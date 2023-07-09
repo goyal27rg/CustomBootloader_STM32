@@ -1,0 +1,27 @@
+--cpu=Cortex-M4.fp.sp
+"custombl_stm32\startup_stm32f429xx.o"
+"custombl_stm32\main.o"
+"custombl_stm32\stm32f4xx_it.o"
+"custombl_stm32\stm32f4xx_hal_msp.o"
+"custombl_stm32\stm32f4xx_hal_crc.o"
+"custombl_stm32\stm32f4xx_hal_rcc.o"
+"custombl_stm32\stm32f4xx_hal_rcc_ex.o"
+"custombl_stm32\stm32f4xx_hal_flash.o"
+"custombl_stm32\stm32f4xx_hal_flash_ex.o"
+"custombl_stm32\stm32f4xx_hal_flash_ramfunc.o"
+"custombl_stm32\stm32f4xx_hal_gpio.o"
+"custombl_stm32\stm32f4xx_hal_dma_ex.o"
+"custombl_stm32\stm32f4xx_hal_dma.o"
+"custombl_stm32\stm32f4xx_hal_pwr.o"
+"custombl_stm32\stm32f4xx_hal_pwr_ex.o"
+"custombl_stm32\stm32f4xx_hal_cortex.o"
+"custombl_stm32\stm32f4xx_hal.o"
+"custombl_stm32\stm32f4xx_hal_exti.o"
+"custombl_stm32\stm32f4xx_hal_tim.o"
+"custombl_stm32\stm32f4xx_hal_tim_ex.o"
+"custombl_stm32\stm32f4xx_hal_uart.o"
+"custombl_stm32\system_stm32f4xx.o"
+--strict --scatter "CustomBL_STM32\CustomBL_STM32.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list "CustomBL_STM32.map" -o CustomBL_STM32\CustomBL_STM32.axf
