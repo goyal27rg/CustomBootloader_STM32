@@ -48,8 +48,8 @@ CRC_HandleTypeDef hcrc;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
-#define DATA_UART &huart1
-#define COM_UART &huart2
+#define COM_UART huart1
+#define DEBUG_UART huart2
 
 #define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
 
@@ -72,61 +72,82 @@ static void MX_CRC_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void printmsg(UART_HandleTypeDef* uartX, char* message, ...)
+void bootloader_sendMessage(UART_HandleTypeDef UARTx, char* str)
+{
+	HAL_UART_Transmit(&UARTx, (uint8_t *)str, strlen(str), HAL_MAX_DELAY);
+}
+
+void bootloader_printDebugMsg(char* message, ...)
 {
 	char str[50];
 	va_list args;
 	va_start(args, message);
 	vsprintf(str, message, args);
-	HAL_UART_Transmit(uartX, (uint8_t *)str, strlen(str), HAL_MAX_DELAY);
+	bootloader_sendMessage(DEBUG_UART, str);
+}
+
+void bootloader_sendCommMsg(char* message, ...)
+{
+  char str[50];
+	va_list args;
+	va_start(args, message);
+	vsprintf(str, message, args);
+	bootloader_sendMessage(COM_UART, str);
 }
 
 void BL_uart_read_data(void)
 {
-	uint8_t rcv_len = 0;
+	uint8_t rcv_len;
 	
 	/* Command format
 	 * ---------------------------------------------------------------------------
 	 * | 1 byte length | 1 byte command | <command specific fields> | 4 byte CRC |
 	 * ---------------------------------------------------------------------------
+   *
+   * read length -> read rest of the frame -> decode cmd -> call relevant function
 	*/
 	
 	while(1)
 	{
-		printmsg(COM_UART, "BL_DEBUG_MSG: Enter Command\r\n");
+    rcv_len = 0;
+		bootloader_printDebugMsg("Enter Command\r\n");
 		
 		// Get the number of bytes to receive
-		HAL_UART_Receive(DATA_UART, rx_buff, 1, HAL_MAX_DELAY);
-		printmsg(COM_UART, "BL_DEBUG_MSG: RXed Cmd Code: 0x%x\r\n", rx_buff[0]);
-		// Get the remaining frame
-		HAL_UART_Receive(DATA_UART, &rx_buff[1], 1, HAL_MAX_DELAY);  //TODO(Pass the correct length to read from UART, later)
+		HAL_UART_Receive(&COM_UART, rx_buff, 1, HAL_MAX_DELAY);
+    rcv_len = rx_buff[0];
 		
+    // Get the remaining frame
+		HAL_UART_Receive(&COM_UART, &rx_buff[1], rcv_len, HAL_MAX_DELAY);
+  	bootloader_printDebugMsg("RXed Cmd Code: 0x%x\r\n", rx_buff[1]);
+
 		// decode the received command
-		switch(rx_buff[1])
+		uint8_t cmd_code = rx_buff[1];
+		switch(cmd_code)
 		{
 			case BL_GET_VER:
-				BL_handle_get_version(&rx_buff[1]);
+				bootloader_handle_getver_cmd(&rx_buff[1]);
 				break;
 			default:
-				printmsg(COM_UART, "BL_DEBUG_MSG: INVALID COMMAND\r\n");
+				bootloader_printDebugMsg("INVALID COMMAND: 0x%x\r\n", cmd_code);
 		}
 	}
 }
+
 void BL_uart_jump_to_user_code(void)
 {
 	// User code shoould be placed at sector 2 of the Flash
 	// First set the MSP for User App
 	uint32_t MSP = *(volatile uint32_t *)FLASH_SECTOR_2_BASE_ADDRESS;
-	printmsg(COM_UART, "BL_DEBUG_MSG: Setting MSP to 0x%X\r\n", MSP);
+	bootloader_printDebugMsg("Setting MSP to 0x%X\r\n", MSP);
 	__set_MSP(MSP);
 	
 	// Jump to User App reset handler
 	uint32_t reset_handler_address = *(volatile uint32_t *) (FLASH_SECTOR_2_BASE_ADDRESS + 4);
 	reset_handler_address |= 0x1;  // need the LSB to be '1' for Cortex-M
-	printmsg(COM_UART, "BL_DEBUG_MSG: Reset Handler Address: 0x%x\r\n", reset_handler_address);
+	bootloader_printDebugMsg("Reset Handler Address: 0x%x\r\n", reset_handler_address);
 	void (*reset_handler) (void);
 	reset_handler = (void*) reset_handler_address;
-	printmsg(COM_UART, "BL_DEBUG_MSG: Jumping to USER APP...\r\n");
+	bootloader_printDebugMsg("Jumping to USER APP...\r\n");
 	reset_handler();
 }
 
@@ -174,12 +195,12 @@ int main(void)
     /* USER CODE END WHILE */
 		if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0))  // check if User button PA0 pressed
 		{	
-			printmsg(COM_UART, "BL_DEBUG_MSG: Button pressed\r\n");
+			bootloader_printDebugMsg("Button pressed\r\n");
 			BL_uart_read_data();
 		}
 		else
 		{
-			printmsg(COM_UART, "BL_DEBUG_MSG: Button released\r\n");
+			bootloader_printDebugMsg("Button released\r\n");
 			BL_uart_jump_to_user_code();
 		}
 		
@@ -378,10 +399,57 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-void BL_handle_get_version(uint8_t* cmd)
+void bootloader_handle_getver_cmd(uint8_t* cmd)
 {
-	printmsg(COM_UART, "reached: BL_handle_get_version\r\n");
+	bootloader_printDebugMsg("reached: BL_handle_get_version\r\n");
+  bootloader_send_ack(1);
+  uint8_t bl_version= BL_VERSION;
+  bootloader_uart_write_data(&bl_version, 1);
 }
+
+void bootloader_send_ack(uint8_t follow_len)
+{
+  // follow_len is the length of the data to be sent after the
+  // ACK from BL to the HOST
+  uint8_t buff[2];
+  buff[0] = BL_ACK;
+  buff[1] = follow_len;
+  HAL_UART_Transmit(&COM_UART, buff, 2, HAL_MAX_DELAY);
+}
+
+void bootloader_send_nack(void)
+{
+  const uint8_t nack = BL_NACK;
+  HAL_UART_Transmit(&COM_UART, &nack, 1, HAL_MAX_DELAY);
+}
+
+uint8_t bootloader_verify_crc (uint8_t *pData, uint32_t len, uint32_t crc_host)
+{
+  // computer the CRC of pData for length len and match with crc_host
+  uint32_t crcVal = 0xff;
+
+  for (uint32_t i=0; i<len; i++)
+  {
+    uint32_t data = pData[i];
+    crcVal = HAL_CRC_Accumulate(&hcrc, &data, 1);
+  }
+
+  if (crcVal == crc_host)
+  {
+    return VERIFY_CRC_SUCCESS;
+  }
+  else
+  {
+    return VERIFY_CRC_FAIL;
+  }
+}
+
+void bootloader_uart_write_data(uint8_t *pBuffer, uint32_t len)
+{
+  HAL_UART_Transmit(&COM_UART, pBuffer, len, HAL_MAX_DELAY);
+}
+
+
 
 #ifdef  USE_FULL_ASSERT
 /**
