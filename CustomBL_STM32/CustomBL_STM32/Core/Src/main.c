@@ -53,7 +53,7 @@ UART_HandleTypeDef huart2;
 
 #define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
 
-uint8_t rx_buff[50];
+uint8_t rx_buff[100];
 
 /* USER CODE BEGIN PV */
 
@@ -109,7 +109,8 @@ void BL_uart_read_data(void)
 	
 	while(1)
 	{
-    rcv_len = 0;
+    memset(rx_buff, 0, 100);
+		rcv_len = 0;
 		bootloader_printDebugMsg("Enter Command\r\n");
 		
 		// Get the number of bytes to receive
@@ -125,40 +126,40 @@ void BL_uart_read_data(void)
 		switch(cmd_code)
 		{
 			case BL_GET_VER:
-				bootloader_handle_getver_cmd(&rx_buff[1]);
+				bootloader_handle_getver_cmd(rx_buff);
 				break;
       case BL_GET_HELP:
-        bootloader_handle_gethelp_cmd(&rx_buff[1]);
+        bootloader_handle_gethelp_cmd(rx_buff);
 				break;
       case BL_GET_CID:
-        bootloader_handle_getcid_cmd(&rx_buff[1]);
+        bootloader_handle_getcid_cmd(rx_buff);
 				break;
       case BL_GET_RDP_STATUS:
-        bootloader_handle_getrdp_cmd(&rx_buff[1]);
+        bootloader_handle_getrdp_cmd(rx_buff);
 				break;
       case BL_GO_TO_ADDR:
-        bootloader_handle_go_cmd(&rx_buff[1]);
+        bootloader_handle_go_cmd(rx_buff);
 				break;
       case BL_FLASH_ERASE:
-        bootloader_handle_flash_erase_cmd(&rx_buff[1]);
+        bootloader_handle_flash_erase_cmd(rx_buff);
 				break;
       case BL_MEM_WRITE:
-        bootloader_handle_mem_write_cmd(&rx_buff[1]);
+        bootloader_handle_mem_write_cmd(rx_buff);
 				break;
       case BL_EN_RW_PROTECT:
-        bootloader_handle_en_rw_protect(&rx_buff[1]);
+        bootloader_handle_en_rw_protect(rx_buff);
 				break;
       case BL_MEM_READ:
-        bootloader_handle_mem_read(&rx_buff[1]);
+        bootloader_handle_mem_read(rx_buff);
 				break;
       case BL_READ_SECTOR_P_STATUS:
-        bootloader_handle_read_sector_protection_status(&rx_buff[1]);
+        bootloader_handle_read_sector_protection_status(rx_buff);
 				break;
       case BL_OTP_READ:
-        bootloader_handle_read_otp(&rx_buff[1]);
+        bootloader_handle_read_otp(rx_buff);
 				break;
       case BL_DIS_R_W_PROTECT:
-        bootloader_handle_dis_rw_protect(&rx_buff[1]);
+        bootloader_handle_dis_rw_protect(rx_buff);
 				break;
 			default:
 				bootloader_printDebugMsg("INVALID COMMAND: 0x%x\r\n", cmd_code);
@@ -176,7 +177,7 @@ void BL_uart_jump_to_user_code(void)
 	
 	// Jump to User App reset handler
 	uint32_t reset_handler_address = *(volatile uint32_t *) (FLASH_SECTOR_2_BASE_ADDRESS + 4);
-	reset_handler_address |= 0x1;  // need the LSB to be '1' for Cortex-M
+	reset_handler_address |= 0x1;  // Make T bit 1
 	bootloader_printDebugMsg("Reset Handler Address: 0x%x\r\n", reset_handler_address);
 	void (*reset_handler) (void);
 	reset_handler = (void*) reset_handler_address;
@@ -525,6 +526,35 @@ void bootloader_handle_getrdp_cmd(uint8_t *pBuffer)
 
 void bootloader_handle_go_cmd(uint8_t *pBuffer)
 {
+  /* Frame format
+	 * ---------------------------------------------------------------------------
+	 * | 1 byte length | 1 byte command |  4 byte Jump-to Address   | 4 byte CRC |
+	 * ---------------------------------------------------------------------------
+   */
+	bootloader_send_ack(1);
+  uint8_t dummy_ack = 0x0;  //TODO(Implement a function to verify address and send correct ACK/NACK)
+	bootloader_uart_write_data(&dummy_ack, sizeof(dummy_ack));
+
+  bootloader_printDebugMsg("reached: bootloader_handle_go_cmd\r\n");
+  uint32_t addr = *(uint32_t*) &pBuffer[2];
+
+  /* the following code is to get the reset handler address from the incoming address
+	 * and jump to it. Uncomment if needed
+	
+    uint32_t app_reset_handler_addr = *((uint32_t*)(addr + 4));
+    app_reset_handler_addr |= 0x1;  // Make T bit 1
+    bootloader_printDebugMsg("Jumping to address: 0x%x\r\n", app_reset_handler_addr);
+    void (*app_reset_handler) (void) = (void*) app_reset_handler_addr;
+    app_reset_handler();
+	
+	*/
+
+	// Host has to make sure that correct address is being passed.
+	// We just jump to the passed address
+	addr |= 0x1;  // Make T bit 1
+  bootloader_printDebugMsg("Jumping to address: 0x%x\r\n", addr);
+  void (*jump_to) (void) = (void*) addr;
+  jump_to();
 }
 
 void bootloader_handle_flash_erase_cmd(uint8_t *pBuffer)
