@@ -127,6 +127,39 @@ void BL_uart_read_data(void)
 			case BL_GET_VER:
 				bootloader_handle_getver_cmd(&rx_buff[1]);
 				break;
+      case BL_GET_HELP:
+        bootloader_handle_gethelp_cmd(&rx_buff[1]);
+				break;
+      case BL_GET_CID:
+        bootloader_handle_getcid_cmd(&rx_buff[1]);
+				break;
+      case BL_GET_RDP_STATUS:
+        bootloader_handle_getrdp_cmd(&rx_buff[1]);
+				break;
+      case BL_GO_TO_ADDR:
+        bootloader_handle_go_cmd(&rx_buff[1]);
+				break;
+      case BL_FLASH_ERASE:
+        bootloader_handle_flash_erase_cmd(&rx_buff[1]);
+				break;
+      case BL_MEM_WRITE:
+        bootloader_handle_mem_write_cmd(&rx_buff[1]);
+				break;
+      case BL_EN_RW_PROTECT:
+        bootloader_handle_en_rw_protect(&rx_buff[1]);
+				break;
+      case BL_MEM_READ:
+        bootloader_handle_mem_read(&rx_buff[1]);
+				break;
+      case BL_READ_SECTOR_P_STATUS:
+        bootloader_handle_read_sector_protection_status(&rx_buff[1]);
+				break;
+      case BL_OTP_READ:
+        bootloader_handle_read_otp(&rx_buff[1]);
+				break;
+      case BL_DIS_R_W_PROTECT:
+        bootloader_handle_dis_rw_protect(&rx_buff[1]);
+				break;
 			default:
 				bootloader_printDebugMsg("INVALID COMMAND: 0x%x\r\n", cmd_code);
 		}
@@ -399,12 +432,9 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-void bootloader_handle_getver_cmd(uint8_t* cmd)
+uint8_t get_bootloader_version(void)
 {
-	bootloader_printDebugMsg("reached: BL_handle_get_version\r\n");
-  bootloader_send_ack(1);
-  uint8_t bl_version= BL_VERSION;
-  bootloader_uart_write_data(&bl_version, 1);
+  return BL_VERSION;
 }
 
 void bootloader_send_ack(uint8_t follow_len)
@@ -449,7 +479,81 @@ void bootloader_uart_write_data(uint8_t *pBuffer, uint32_t len)
   HAL_UART_Transmit(&COM_UART, pBuffer, len, HAL_MAX_DELAY);
 }
 
+void bootloader_handle_getver_cmd(uint8_t* cmd)
+{
+	bootloader_printDebugMsg("reached: bootloader_handle_getver_cmd\r\n");
+  bootloader_send_ack(1);
+  uint8_t bl_version= get_bootloader_version();
+  bootloader_uart_write_data(&bl_version, 1);
+}
 
+void bootloader_handle_gethelp_cmd(uint8_t* pBuffer)
+{
+  bootloader_printDebugMsg("reached: bootloader_handle_gethelp_cmd\r\n");
+  //char str[] = "gethelp not implemented\r\n";
+  char str [] = "";  //TODO(implement, later)
+  bootloader_send_ack(strlen(str));
+  bootloader_uart_write_data((uint8_t*)str, strlen(str));
+}
+
+void bootloader_handle_getcid_cmd(uint8_t *pBuffer)
+{
+	bootloader_printDebugMsg("reached: bootloader_handle_getcid_cmd\r\n");
+  
+	uint32_t mcu_idcode = DBGMCU->IDCODE;
+	uint16_t dev_id = mcu_idcode & ((1 << 12) - 1);  // device id is [11:0]
+	
+	bootloader_send_ack(sizeof(dev_id));
+	bootloader_uart_write_data((uint8_t*)&dev_id, sizeof(dev_id));
+	
+}
+
+void bootloader_handle_getrdp_cmd(uint8_t *pBuffer)
+{
+	
+	bootloader_printDebugMsg("reached: bootloader_handle_getrdp_cmd\r\n");
+  
+	// RDP is a part of Option Bytes in Flash memory interface
+	// this can be read from FLASH_OPTCR[15:8]
+	uint32_t optcr = FLASH->OPTCR;
+	uint8_t rdp = (optcr & FLASH_OPTCR_RDP_Msk) >> FLASH_OPTCR_RDP_Pos;
+	
+	bootloader_send_ack(sizeof(rdp));
+	bootloader_uart_write_data(&rdp, sizeof(rdp));
+
+}
+
+void bootloader_handle_go_cmd(uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_flash_erase_cmd(uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_en_rw_protect(uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_mem_read (uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_read_sector_protection_status(uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_read_otp(uint8_t *pBuffer)
+{
+}
+
+void bootloader_handle_dis_rw_protect(uint8_t *pBuffer)
+{
+}
 
 #ifdef  USE_FULL_ASSERT
 /**
