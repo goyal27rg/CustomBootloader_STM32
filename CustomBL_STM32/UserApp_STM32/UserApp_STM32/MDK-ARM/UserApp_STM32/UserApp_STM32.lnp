@@ -1,0 +1,26 @@
+--cpu=Cortex-M4.fp.sp
+"userapp_stm32\startup_stm32f429xx.o"
+"userapp_stm32\main.o"
+"userapp_stm32\stm32f4xx_it.o"
+"userapp_stm32\stm32f4xx_hal_msp.o"
+"userapp_stm32\stm32f4xx_hal_tim.o"
+"userapp_stm32\stm32f4xx_hal_tim_ex.o"
+"userapp_stm32\stm32f4xx_hal_uart.o"
+"userapp_stm32\stm32f4xx_hal_rcc.o"
+"userapp_stm32\stm32f4xx_hal_rcc_ex.o"
+"userapp_stm32\stm32f4xx_hal_flash.o"
+"userapp_stm32\stm32f4xx_hal_flash_ex.o"
+"userapp_stm32\stm32f4xx_hal_flash_ramfunc.o"
+"userapp_stm32\stm32f4xx_hal_gpio.o"
+"userapp_stm32\stm32f4xx_hal_dma_ex.o"
+"userapp_stm32\stm32f4xx_hal_dma.o"
+"userapp_stm32\stm32f4xx_hal_pwr.o"
+"userapp_stm32\stm32f4xx_hal_pwr_ex.o"
+"userapp_stm32\stm32f4xx_hal_cortex.o"
+"userapp_stm32\stm32f4xx_hal.o"
+"userapp_stm32\stm32f4xx_hal_exti.o"
+"userapp_stm32\system_stm32f4xx.o"
+--strict --scatter "UserApp_STM32\UserApp_STM32.sct"
+--summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
+--info sizes --info totals --info unused --info veneers
+--list "UserApp_STM32.map" -o UserApp_STM32\UserApp_STM32.axf
