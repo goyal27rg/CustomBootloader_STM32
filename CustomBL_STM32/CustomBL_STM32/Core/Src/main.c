@@ -559,6 +559,50 @@ void bootloader_handle_go_cmd(uint8_t *pBuffer)
 
 void bootloader_handle_flash_erase_cmd(uint8_t *pBuffer)
 {
+  /* Frame format
+	 * -----------------------------------------------------------------------------------------------------------
+	 * | 1 byte length | 1 byte command |  1 byte sector index | 1 byte total number of sectors | 4 byte CRC |
+	 * -----------------------------------------------------------------------------------------------------------
+   */
+
+	bootloader_printDebugMsg("reached: bootloader_handle_flash_erase_cmd\r\n");
+	bootloader_send_ack(1);
+
+	FLASH_EraseInitTypeDef flashErase;
+	uint8_t sector_idx = pBuffer[2];
+	uint8_t nb_sectors = pBuffer[3];
+	uint32_t sector_error = 0;
+	uint8_t status = HAL_ERROR;
+	
+	if (sector_idx == 0xFF)  // 0xFF indicates mass erase
+	{
+		bootloader_printDebugMsg("Performing MASS ERASE\r\n");
+		flashErase.TypeErase = FLASH_TYPEERASE_MASSERASE;
+		flashErase.Banks = FLASH_BANK_BOTH;
+	}
+	else if (sector_idx + nb_sectors <= FLASH_SECTOR_TOTAL)
+	{
+		bootloader_printDebugMsg("Erasing sectors..\r\n");
+		bootloader_printDebugMsg("First sector: %d, number of sectors: %d\r\n", sector_idx, nb_sectors);
+		flashErase.TypeErase = FLASH_TYPEERASE_SECTORS;
+		flashErase.Sector =  sector_idx;
+		flashErase.NbSectors = nb_sectors;
+		flashErase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+	}
+	else
+	{
+		bootloader_printDebugMsg("INVALID SECTOR CHOICE!!!\r\n");
+		bootloader_uart_write_data(&status, sizeof(status));
+		return;
+	}
+	
+	HAL_FLASH_Unlock();
+	bootloader_printDebugMsg("Begin Erase...\r\n");
+	status = HAL_FLASHEx_Erase(&flashErase, &sector_error);
+	bootloader_printDebugMsg("Erase Done. Status: 0x%x\r\n", status);
+	HAL_FLASH_Lock();
+	
+	bootloader_uart_write_data(&status, sizeof(status));
 }
 
 void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)

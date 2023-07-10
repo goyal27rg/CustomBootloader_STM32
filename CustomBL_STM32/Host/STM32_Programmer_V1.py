@@ -402,18 +402,19 @@ def decode_menu_command_code(command):
         ret_value = read_bootloader_reply(data_buf[1])
         
     elif(command == 6):
-        print("\n   This command is not supported")
+        print("\n   This command is not supported\nUse BL_FLASH_ERASE with sector index 0xFF")
     elif(command == 7):
         print("\n   Command == > BL_FLASH_ERASE")
         data_buf[0] = COMMAND_BL_FLASH_ERASE_LEN-1 
         data_buf[1] = COMMAND_BL_FLASH_ERASE 
         sector_num = input("\n   Enter sector number(0-7 or 0xFF) here :")
         sector_num = int(sector_num, 16)
+        nsec = 0
         if(sector_num != 0xff):
             nsec=int(input("\n   Enter number of sectors to erase(max 8) here :"))
         
         data_buf[2]= sector_num 
-        data_buf[3]= nsec 
+        data_buf[3]= nsec
 
         crc32       = get_crc(data_buf,COMMAND_BL_FLASH_ERASE_LEN-4) 
         data_buf[4] = word_to_byte(crc32,1,1) 

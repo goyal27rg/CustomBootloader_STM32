@@ -30,15 +30,13 @@ Build target 'CustomBL_STM32'
 compiling main.c...
 ../Core/Src/main.c(183): warning:  #513-D: a value of type "void *" cannot be assigned to an entity of type "void (*)(void)"
   	reset_handler = (void*) reset_handler_address;
-../Core/Src/main.c(545): warning:  #144-D: a value of type "void *" cannot be used to initialize an entity of type "void (*)(void)"
-      void (*app_reset_handler) (void) = (void*) app_reset_handler_addr;
-../Core/Src/main.c(551): warning:  #144-D: a value of type "void *" cannot be used to initialize an entity of type "void (*)(void)"
+../Core/Src/main.c(556): warning:  #144-D: a value of type "void *" cannot be used to initialize an entity of type "void (*)(void)"
     void (*jump_to) (void) = (void*) addr;
-../Core/Src/main.c: 3 warnings, 0 errors
+../Core/Src/main.c: 2 warnings, 0 errors
 linking...
-Program Size: Code=12230 RO-data=1038 RW-data=24 ZI-data=1872  
+Program Size: Code=13226 RO-data=1038 RW-data=24 ZI-data=1904  
 FromELF: creating hex file...
-"CustomBL_STM32\CustomBL_STM32.axf" - 0 Error(s), 3 Warning(s).
+"CustomBL_STM32\CustomBL_STM32.axf" - 0 Error(s), 2 Warning(s).
 
 <h2>Software Packages used:</h2>
 
