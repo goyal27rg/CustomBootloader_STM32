@@ -53,7 +53,7 @@ UART_HandleTypeDef huart2;
 
 #define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
 
-uint8_t rx_buff[100];
+uint8_t rx_buff[200];
 
 /* USER CODE BEGIN PV */
 
@@ -607,6 +607,57 @@ void bootloader_handle_flash_erase_cmd(uint8_t *pBuffer)
 
 void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)
 {
+  /* Frame format
+	 * -----------------------------------------------------------------------------------------------------------
+	 * | 1 byte length | 1 byte command |  4 byte Base Address | 1 byte length of payload | PAYLOAD | 4 byte CRC |
+	 * -----------------------------------------------------------------------------------------------------------
+   */
+	
+	// Flash needs to be erased before writing otherwise written data won't be persistent
+	//TODO(identiy sector from Address and erase it)
+	
+	bootloader_printDebugMsg("reached: bootloader_handle_mem_write_cmd\r\n");
+	bootloader_send_ack(1);
+
+  uint8_t status = HAL_OK;
+
+  uint32_t mem_base_addr = *((uint32_t*) &pBuffer[2]);
+  uint8_t payload_len = pBuffer[6];
+
+  uint8_t *pMem = (uint8_t *) mem_base_addr;
+  uint8_t *pPayload = (uint8_t *) &pBuffer[7];
+
+  bootloader_printDebugMsg("Memory base addr: 0x%x\r\n", pMem);
+  bootloader_printDebugMsg("Payload length: %d\r\n", payload_len);
+
+  HAL_FLASH_Unlock();
+	
+	FLASH->CR &= ~(FLASH_CR_PSIZE); // set program size to byte since we are writing byte-by-byte later
+	FLASH->CR |= FLASH_CR_PG; // set PG in FLASH_CR
+
+	while (payload_len > 0)
+  {
+    // wait till flash is busy
+		FLASH_WaitForLastOperation(HAL_MAX_DELAY);
+		//while(FLASH->SR & (1 << 16));
+		
+		// copy data
+		*pMem = *pPayload;
+		// bootloader_printDebugMsg("pMem: 0x%x, pPayload: 0x%x\r\n", *pMem, *pPayload);
+    pMem++;
+    pPayload++;
+    payload_len--;
+		
+		// wait for FLASH_SR.BSY to get cleared
+		//while(FLASH->SR & FLASH_SR_BSY_Msk);
+  }
+	
+	FLASH_WaitForLastOperation(HAL_MAX_DELAY);
+	FLASH->CR &= ~(FLASH_CR_PG);
+	
+	HAL_FLASH_Lock();
+
+	bootloader_uart_write_data(&status, sizeof(status));
 }
 
 void bootloader_handle_en_rw_protect(uint8_t *pBuffer)

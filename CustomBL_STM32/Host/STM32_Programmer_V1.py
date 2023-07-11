@@ -41,7 +41,8 @@ COMMAND_BL_MY_NEW_COMMAND_LEN                       =8
 
 
 verbose_mode = 1
-mem_write_active =0
+mem_write_active = 0
+mem_print_counter = 0
 
 #----------------------------- file ops----------------------------------------
 
@@ -141,12 +142,16 @@ def Close_serial_port():
 def purge_serial_port():
     ser.reset_input_buffer()
     
-def Write_to_serial_port(value, *length):
+def Write_to_serial_port(value, *length, mem=False):
+        global mem_print_counter
         data = struct.pack('>B', value)
-        if (verbose_mode):
+        if (verbose_mode and not mem):
             value = bytearray(data)
             #print("   "+hex(value[0]), end='')
-            print("   "+"0x{:02x}".format(value[0]),end=' ')
+            end = '\n'  if mem_print_counter % 16 == 0 and mem else ' '
+            print("   "+"0x{:02x}".format(value[0]),end=end)
+            if mem:
+                mem_print_counter += 1
         if(mem_write_active and (not verbose_mode)):
                 print("#",end=' ')
         ser.write(data)
@@ -491,9 +496,14 @@ def decode_menu_command_code(command):
 
             Write_to_serial_port(data_buf[0],1)
         
-            for i in data_buf[1:mem_write_cmd_total_len]:
-                Write_to_serial_port(i,mem_write_cmd_total_len-1)
+            print("Writing to mem---")
+            for i in data_buf[7:mem_write_cmd_total_len-4]:
+                print(hex(i))
+            print("---mem write done")
 
+            for i in data_buf[1:mem_write_cmd_total_len]:
+                Write_to_serial_port(i,mem_write_cmd_total_len-1, mem=True)
+            
             bytes_so_far_sent+=len_to_read
             bytes_remaining = t_len_of_file - bytes_so_far_sent
             print("\n   bytes_so_far_sent:{0} -- bytes_remaining:{1}\n".format(bytes_so_far_sent,bytes_remaining)) 
