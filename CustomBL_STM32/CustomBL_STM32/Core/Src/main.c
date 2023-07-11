@@ -52,6 +52,18 @@ UART_HandleTypeDef huart2;
 #define DEBUG_UART huart2
 
 #define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
+#define FLASH_SECTOR_3_BASE_ADDRESS 0x0800C000U
+#define FLASH_SECTOR_4_BASE_ADDRESS 0x08010000U
+
+#define FLASH_SECTOR_2_SIZE 0x04000U
+#define FLASH_SECTOR_3_SIZE 0x04000U
+#define FLASH_SECTOR_4_SIZE 0x10000U
+
+#define IMAGE_A_BASER_ADDRESS       FLASH_SECTOR_2_BASE_ADDRESS
+#define IMAGE_B_BASER_ADDRESS       FLASH_SECTOR_3_BASE_ADDRESS
+
+#define IMAGE_A_MAX_SIZE            FLASH_SECTOR_2_SIZE
+#define IMAGE_B_MAX_SIZE            FLASH_SECTOR_3_SIZE
 
 uint8_t rx_buff[200];
 
@@ -624,29 +636,36 @@ void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)
   uint32_t mem_base_addr = *((uint32_t*) &pBuffer[2]);
   uint8_t payload_len = pBuffer[6];
 
-  uint8_t *pMem = (uint8_t *) mem_base_addr;
-  uint8_t *pPayload = (uint8_t *) &pBuffer[7];
+  execute_mem_write(&pBuffer[7], mem_base_addr, payload_len);
 
-  bootloader_printDebugMsg("Memory base addr: 0x%x\r\n", pMem);
-  bootloader_printDebugMsg("Payload length: %d\r\n", payload_len);
+	bootloader_uart_write_data(&status, sizeof(status));
+}
 
-  HAL_FLASH_Unlock();
+uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t nb_bytes)
+{
+  uint8_t *pMem = (uint8_t *)dest_base_addr;
+	
+	bootloader_printDebugMsg("reached: execute_mem_write");
+	bootloader_printDebugMsg("Dest Mem base addr: 0x%x\r\n", pMem);
+	bootloader_printDebugMsg("Length of Write:    %d\r\n", nb_bytes);
+  	
+	HAL_FLASH_Unlock();
 	
 	FLASH->CR &= ~(FLASH_CR_PSIZE); // set program size to byte since we are writing byte-by-byte later
 	FLASH->CR |= FLASH_CR_PG; // set PG in FLASH_CR
 
-	while (payload_len > 0)
+	while (nb_bytes > 0)
   {
     // wait till flash is busy
 		FLASH_WaitForLastOperation(HAL_MAX_DELAY);
 		//while(FLASH->SR & (1 << 16));
 		
 		// copy data
-		*pMem = *pPayload;
-		// bootloader_printDebugMsg("pMem: 0x%x, pPayload: 0x%x\r\n", *pMem, *pPayload);
+		*pMem = *pBuffer;
+		//bootloader_printDebugMsg("pMem: 0x%x, pPayload: 0x%x\r\n", *pMem, *pBuffer);
     pMem++;
-    pPayload++;
-    payload_len--;
+    pBuffer++;
+    nb_bytes--;
 		
 		// wait for FLASH_SR.BSY to get cleared
 		//while(FLASH->SR & FLASH_SR_BSY_Msk);
@@ -656,8 +675,7 @@ void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)
 	FLASH->CR &= ~(FLASH_CR_PG);
 	
 	HAL_FLASH_Lock();
-
-	bootloader_uart_write_data(&status, sizeof(status));
+	return HAL_OK;
 }
 
 void bootloader_handle_en_rw_protect(uint8_t *pBuffer)
