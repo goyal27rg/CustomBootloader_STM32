@@ -61,6 +61,7 @@ void bootloader_handle_mem_read (uint8_t *pBuffer);
 void bootloader_handle_read_sector_protection_status(uint8_t *pBuffer);
 void bootloader_handle_read_otp(uint8_t *pBuffer);
 void bootloader_handle_dis_rw_protect(uint8_t *pBuffer);
+void bootloader_handle_image_update(uint8_t *pBuffer);
 
 void bootloader_send_ack(uint8_t follow_len);
 void bootloader_send_nack(void);
@@ -78,6 +79,11 @@ uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t nu
 uint8_t configure_flash_sector_rw_protection(uint8_t sector_details, uint8_t protection_mode, uint8_t disable);
 
 uint16_t read_OB_rw_protection_status(void);
+
+/* Image update helper functions */
+void reset_image_settings(void);
+uint32_t get_image_to_update(void);
+
 
 //version 1.0
 #define BL_VERSION 0x10
@@ -116,13 +122,14 @@ uint16_t read_OB_rw_protection_status(void);
 //This command is used to read all the sector protection status.
 #define BL_READ_SECTOR_P_STATUS	0x5A
 
-
 //This command is used to read the OTP contents.
 #define BL_OTP_READ				0x5B
 
-
 //This command is used disable all sector read/write protection 
 #define BL_DIS_R_W_PROTECT				0x5C
+
+//This command is used to push image update
+#define BL_UPDATE_IMAGE				    0x5D
 
 /* ACK and NACK bytes*/
 #define BL_ACK   0XA5
@@ -159,6 +166,34 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
+
+/* A/B Swap mechanism related macro definitions */
+typedef struct {
+  uint32_t crc;
+  uint32_t size;
+} IMAGE_data_TypeDef;
+
+#define FLASH_SECTOR_1_BASE_ADDRESS 0x08004000U
+#define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
+#define FLASH_SECTOR_3_BASE_ADDRESS 0x0800C000U
+#define FLASH_SECTOR_4_BASE_ADDRESS 0x08010000U
+
+#define FLASH_SECTOR_1_SIZE 0x04000U
+#define FLASH_SECTOR_2_SIZE 0x04000U
+#define FLASH_SECTOR_3_SIZE 0x04000U
+#define FLASH_SECTOR_4_SIZE 0x10000U
+
+#define IMAGE_A_BASE_ADDRESS        FLASH_SECTOR_2_BASE_ADDRESS
+#define IMAGE_B_BASE_ADDRESS        FLASH_SECTOR_3_BASE_ADDRESS
+
+#define IMAGE_MAX_SIZE              FLASH_SECTOR_2_SIZE
+
+// Store Image Data in sector 1
+#define IMAGE_A_DATA_BASE_ADDRESS   FLASH_SECTOR_1_BASE_ADDRESS
+#define IMAGE_B_DATA_BASE_ADDRESS   IMAGE_A_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef);
+
+#define IMAGE_A_DATA                ((IMAGE_data_TypeDef *) IMAGE_A_DATA_BASE_ADDRESS)
+#define IMAGE_B_DATA                ((IMAGE_data_TypeDef *) IMAGE_B_DATA_BASE_ADDRESS)
 
 /* USER CODE END Private defines */
 

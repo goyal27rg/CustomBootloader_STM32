@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <math.h>
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -51,19 +52,7 @@ UART_HandleTypeDef huart2;
 #define COM_UART huart1
 #define DEBUG_UART huart2
 
-#define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
-#define FLASH_SECTOR_3_BASE_ADDRESS 0x0800C000U
-#define FLASH_SECTOR_4_BASE_ADDRESS 0x08010000U
 
-#define FLASH_SECTOR_2_SIZE 0x04000U
-#define FLASH_SECTOR_3_SIZE 0x04000U
-#define FLASH_SECTOR_4_SIZE 0x10000U
-
-#define IMAGE_A_BASER_ADDRESS       FLASH_SECTOR_2_BASE_ADDRESS
-#define IMAGE_B_BASER_ADDRESS       FLASH_SECTOR_3_BASE_ADDRESS
-
-#define IMAGE_A_MAX_SIZE            FLASH_SECTOR_2_SIZE
-#define IMAGE_B_MAX_SIZE            FLASH_SECTOR_3_SIZE
 
 uint8_t rx_buff[200];
 
@@ -172,6 +161,9 @@ void BL_uart_read_data(void)
 				break;
       case BL_DIS_R_W_PROTECT:
         bootloader_handle_dis_rw_protect(rx_buff);
+				break;
+      case BL_UPDATE_IMAGE:
+        bootloader_handle_image_update(rx_buff);
 				break;
 			default:
 				bootloader_printDebugMsg("INVALID COMMAND: 0x%x\r\n", cmd_code);
@@ -476,6 +468,8 @@ uint8_t bootloader_verify_crc (uint8_t *pData, uint32_t len, uint32_t crc_host)
     uint32_t data = pData[i];
     crcVal = HAL_CRC_Accumulate(&hcrc, &data, 1);
   }
+	 /* Reset CRC Calculation Unit */
+  __HAL_CRC_DR_RESET(&hcrc);
 
   if (crcVal == crc_host)
   {
@@ -483,7 +477,8 @@ uint8_t bootloader_verify_crc (uint8_t *pData, uint32_t len, uint32_t crc_host)
   }
   else
   {
-    return VERIFY_CRC_FAIL;
+    bootloader_printDebugMsg("BL CRC: 0x%x\r\n", crcVal);
+		return VERIFY_CRC_FAIL;
   }
 }
 
@@ -631,13 +626,119 @@ void bootloader_handle_dis_rw_protect(uint8_t *pBuffer)
 {
 }
 
+void bootloader_handle_image_update(uint8_t *pBuffer)
+{
+  /* Frame format
+	 * -------------------------------------------------------------
+	 * | 1 byte length | 1 byte command | 4 bytes total image size |
+	 * -------------------------------------------------------------
+   */
+
+   /* After receiving the command, image would be received in subsequent frames of 128 byte each
+    * (except the last frame which can have any number of bytes from [1 - 128])
+    *
+    * Image Frame format
+    * ---------------------------------------------------------
+	  * | 1 byte length of image data | image data | 4 byte CRC |
+	  * ---------------------------------------------------------
+    */
+  
+ 	bootloader_printDebugMsg("reached: bootloader_handle_image_update\r\n");
+	 	
+  uint32_t rx_image_size = *((uint32_t *) &pBuffer[2]);	
+	bootloader_printDebugMsg("image size: %d\r\n", rx_image_size);
+
+  if (rx_image_size > (uint32_t) IMAGE_MAX_SIZE)
+  {
+    bootloader_send_nack();
+		return;
+  }
+
+  bootloader_send_ack(0);
+
+  uint8_t status = HAL_OK;
+	
+	// calculate number of frames to receive
+	uint8_t num_rx_frames = rx_image_size / 128;
+	if (rx_image_size % 128 != 0)
+	{
+		num_rx_frames++;
+	}
+	
+  uint8_t image_rx_buff[150];
+	uint8_t image_frame_data_len;
+	uint32_t image_to_update_address = get_image_to_update();
+	uint8_t ready = 0x1;
+
+  // get all image frames and write to mem
+	while(num_rx_frames > 0)
+	{
+		memset(image_rx_buff, 0, 150);
+		
+		bootloader_uart_write_data(&ready, 1);
+		// receive the image length from HOST
+		while(HAL_UART_Receive(&COM_UART, image_rx_buff, 1, HAL_MAX_DELAY) != HAL_OK);
+		image_frame_data_len = image_rx_buff[0];
+
+		// receive the remaining image frame from HOST
+		HAL_UART_Receive(&COM_UART, &image_rx_buff[1], image_frame_data_len + 4, HAL_MAX_DELAY);  // +4 for CRC bytes
+			
+		// verify CRC
+		uint32_t crc_host = *((uint32_t *) (image_rx_buff + image_frame_data_len + 1));  // last 4 bytes of the frame
+		uint8_t crc_status = bootloader_verify_crc(image_rx_buff, image_frame_data_len + 1, crc_host);
+		
+		if (crc_status == VERIFY_CRC_FAIL)
+		{
+			bootloader_send_nack();
+			bootloader_printDebugMsg("CRC CHECK FAILED !!! -- host CRC: 0x%x\r\n", crc_host);
+			return;
+		}
+		
+		bootloader_printDebugMsg("image_frame_data_len: %d  --  num_rx_frames: %d", image_frame_data_len, num_rx_frames);
+		bootloader_printDebugMsg("  -- image_to_update_address: 0x%x\r\n", image_to_update_address);
+				
+		bootloader_send_ack(1);  // CRC check passed
+		
+		// write to mem and update address
+		execute_mem_write(&image_rx_buff[1], image_to_update_address, (uint32_t) image_frame_data_len);
+		image_to_update_address += image_frame_data_len;
+		num_rx_frames--;
+		
+		bootloader_uart_write_data(&status, 1);
+		
+		//uint8_t cTick = HAL_GetTick();
+		//while(HAL_GetTick() < cTick + 500);
+
+	}
+
+	// jump to image
+	uint32_t image_base_addr = get_image_to_update();
+	uint32_t image_reset_handler_address = *((uint32_t *) (image_base_addr + 4));
+	image_reset_handler_address |= 0x1;  // Making T-bit 1
+	
+	bootloader_printDebugMsg("Image base addr: 0x%x\r\n", image_base_addr);
+	bootloader_printDebugMsg("Jumping to:      0x%x\r\n", image_reset_handler_address);
+
+	void (*jump_to_image) (void) = (void *) image_reset_handler_address;
+	jump_to_image();
+}
+
+void reset_image_settings(void)
+{
+	
+}
+uint32_t get_image_to_update(void)
+{
+	return IMAGE_A_BASE_ADDRESS;
+}
+
 uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t number_of_bytes)
 {
   uint8_t *pMem = (uint8_t *)dest_base_addr;
 	
-	bootloader_printDebugMsg("reached: execute_mem_write");
-	bootloader_printDebugMsg("Dest Mem base addr: 0x%x\r\n", pMem);
-	bootloader_printDebugMsg("Length of Write:    %d\r\n", number_of_bytes);
+	//bootloader_printDebugMsg("reached: execute_mem_write\r\n");
+	//bootloader_printDebugMsg("Dest Mem base addr: 0x%x\r\n", pMem);
+	//bootloader_printDebugMsg("Length of Write:    %d\r\n", number_of_bytes);
   	
 	HAL_FLASH_Unlock();
 	

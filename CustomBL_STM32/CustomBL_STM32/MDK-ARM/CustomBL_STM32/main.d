@@ -2,6 +2,7 @@ custombl_stm32\main.o: ../Core/Src/main.c
 custombl_stm32\main.o: D:\Rakshit\KeilMDK\ARM\ARM_Compiler_5.06u7\Bin\..\include\string.h
 custombl_stm32\main.o: D:\Rakshit\KeilMDK\ARM\ARM_Compiler_5.06u7\Bin\..\include\stdarg.h
 custombl_stm32\main.o: D:\Rakshit\KeilMDK\ARM\ARM_Compiler_5.06u7\Bin\..\include\stdio.h
+custombl_stm32\main.o: D:\Rakshit\KeilMDK\ARM\ARM_Compiler_5.06u7\Bin\..\include\math.h
 custombl_stm32\main.o: ../Core/Inc/main.h
 custombl_stm32\main.o: ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h
 custombl_stm32\main.o: ../Core/Inc/stm32f4xx_hal_conf.h

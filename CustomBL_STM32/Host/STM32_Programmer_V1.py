@@ -10,6 +10,9 @@ Flash_HAL_BUSY                                      = 0x02
 Flash_HAL_TIMEOUT                                   = 0x03
 Flash_HAL_INV_ADDR                                  = 0x04
 
+VERIFY_CRC_FAIL    =1
+VERIFY_CRC_SUCCESS =0
+
 #BL Commands
 COMMAND_BL_GET_VER                                  = 0x51
 COMMAND_BL_GET_HELP                                 = 0x52
@@ -24,6 +27,10 @@ COMMAND_BL_READ_SECTOR_P_STATUS                     =0x5A
 COMMAND_BL_OTP_READ                                 =0x5B
 COMMAND_BL_DIS_R_W_PROTECT                          =0x5C
 COMMAND_BL_MY_NEW_COMMAND                           =0x5D
+COMMAND_BL_UPDATE_IMAGE				                =0x5D
+
+
+COMMAND_BL_IMAGE_FRAME                              =0xFF
 
 
 #len details of the command
@@ -37,7 +44,7 @@ COMMAND_BL_MEM_WRITE_LEN                            = 11
 COMMAND_BL_EN_R_W_PROTECT_LEN                       =8
 COMMAND_BL_READ_SECTOR_P_STATUS_LEN                 =6
 COMMAND_BL_DIS_R_W_PROTECT_LEN                      =6
-COMMAND_BL_MY_NEW_COMMAND_LEN                       =8
+COMMAND_BL_UPDATE_IMAGE_LEN                         =10
 
 
 verbose_mode = 1
@@ -47,11 +54,13 @@ mem_print_counter = 0
 #----------------------------- file ops----------------------------------------
 
 def calc_file_len():
+    print(f"CWD: {os.getcwd()}")
     size = os.path.getsize("user_app.bin")
     return size
 
 def open_the_file():
     global bin_file
+    print(f"CWD: {os.getcwd()}")
     bin_file = open('user_app.bin','rb')
     #read = bin_file.read()
     #global file_contents = bytearray(read)
@@ -293,8 +302,18 @@ def process_COMMAND_BL_EN_R_W_PROTECT(length):
     else:
         print("\n   SUCCESS")
 
+def process_COMMAND_BL_UPDATE_IMAGE(length):
+    if length > 0:
+        value = read_serial_port(length)
 
-
+def process_COMMAND_BL_IMAGE_FRAME(length):
+    status=0
+    value = read_serial_port(length)
+    status = bytearray(value)
+    if(status[0]):
+        print("\n   FAIL")
+    else:
+        print("\n   SUCCESS")
 
 def decode_menu_command_code(command):
     ret_value = 0
@@ -594,21 +613,103 @@ def decode_menu_command_code(command):
         ret_value = read_bootloader_reply(data_buf[1])
         
     elif(command == 14):
-        print("\n   Command == > COMMAND_BL_MY_NEW_COMMAND ")
-        data_buf[0] = COMMAND_BL_MY_NEW_COMMAND_LEN-1 
-        data_buf[1] = COMMAND_BL_MY_NEW_COMMAND 
-        crc32       = get_crc(data_buf,COMMAND_BL_MY_NEW_COMMAND_LEN-4) 
-        data_buf[2] = word_to_byte(crc32,1,1) 
-        data_buf[3] = word_to_byte(crc32,2,1) 
-        data_buf[4] = word_to_byte(crc32,3,1) 
-        data_buf[5] = word_to_byte(crc32,4,1) 
+        import time
+        print("\n   Command == > COMMAND_BL_UPDATE_IMAGE ")
+        data_buf[0] = COMMAND_BL_UPDATE_IMAGE_LEN-1 
+        data_buf[1] = COMMAND_BL_UPDATE_IMAGE
+
+        # open file and get size
+        open_the_file()
+        file_size = calc_file_len()
+        data_buf[2] = word_to_byte(file_size,1,1) 
+        data_buf[3] = word_to_byte(file_size,2,1) 
+        data_buf[4] = word_to_byte(file_size,3,1) 
+        data_buf[5] = word_to_byte(file_size,4,1) 
+
+
+        crc32       = get_crc(data_buf,COMMAND_BL_UPDATE_IMAGE_LEN-4) 
+        data_buf[6] = word_to_byte(crc32,1,1) 
+        data_buf[7] = word_to_byte(crc32,2,1) 
+        data_buf[8] = word_to_byte(crc32,3,1) 
+        data_buf[9] = word_to_byte(crc32,4,1) 
 
         Write_to_serial_port(data_buf[0],1)
         
-        for i in data_buf[1:COMMAND_BL_MY_NEW_COMMAND_LEN]:
-            Write_to_serial_port(i,COMMAND_BL_MY_NEW_COMMAND_LEN-1)
+        for i in data_buf[1:COMMAND_BL_UPDATE_IMAGE_LEN]:
+            Write_to_serial_port(i,COMMAND_BL_UPDATE_IMAGE_LEN-1)
         
         ret_value = read_bootloader_reply(data_buf[1])
+                
+        img_frame_size = 128
+        bytes_to_write = file_size
+        bytes_written = 0
+
+        print(f"file size: {file_size}\n")
+
+        frame_count = 0
+
+        #construct frames with 1-byte length and upto 128 byte data
+        while(bytes_to_write > 0):
+            image_buff = []
+            bytes_this_iter = 128 if bytes_to_write >= img_frame_size else bytes_to_write
+            for i in range(bytes_this_iter):
+                file_read_value = bin_file.read(1)
+                file_read_value = bytearray(file_read_value)
+                image_buff.append(int(file_read_value[0]))
+
+            bytes_to_write -= bytes_this_iter
+            bytes_written += bytes_this_iter
+
+            crc32       = get_crc([bytes_this_iter] + image_buff, bytes_to_write)
+            crc32 = crc32 & ((1 << 32) - 1)
+            image_buff.append(word_to_byte(crc32,1,1))
+            image_buff.append(word_to_byte(crc32,2,1))
+            image_buff.append(word_to_byte(crc32,3,1))
+            image_buff.append(word_to_byte(crc32,4,1))
+            print(f"host crc: {crc32:#x}")
+
+            bl_ready = False
+            count = 10
+            while(not bl_ready and count > 0):
+                # BL send 0x1 when ready
+                bl_ready = bool(read_serial_port(1))
+                count-=1;
+                time.sleep(0.1)            
+
+            Write_to_serial_port(bytes_this_iter, 1)
+            #ser.write(bytearray([img_frame_size]))
+            #assert(len(bytearray(image_buff)) == bytes_to_write+4)
+            for data in image_buff:
+                #ser.write(bytearray(image_buff))
+                Write_to_serial_port(data, 1)
+            
+            retval = read_bootloader_reply(COMMAND_BL_IMAGE_FRAME)
+            if (retval != 0 ):
+                print("Something's wrong !!!!!")
+                return
+            #time.sleep(.3)            
+            frame_count += 1
+            print(f"\bwritten {bytes_written} bytes so far. {bytes_to_write} remaining\n")
+            print(f"frames written: {frame_count}")
+
+            
+        #write remaining bytes
+        """
+        if bytes_to_write > 0:
+            print(f"writing remainder: {bytes_to_write} bytes")
+            assert bytes_to_write < img_frame_size
+            image_buff = []
+            image_buff.append(bytes_to_write)
+
+            for i in range(bytes_to_write):
+                file_read_value = bin_file.read(1)
+                file_read_value = bytearray(file_read_value)
+                image_buff.append(int(file_read_value[0]))
+
+            for data in image_buff:
+                Write_to_serial_port(data, 1)
+        """
+
     else:
         print("\n   Please input valid command code\n")
         return
@@ -664,8 +765,11 @@ def read_bootloader_reply(command_code):
             elif(command_code) == COMMAND_BL_DIS_R_W_PROTECT:
                 process_COMMAND_BL_DIS_R_W_PROTECT(len_to_follow)
                 
-            elif(command_code) == COMMAND_BL_MY_NEW_COMMAND:
-                process_COMMAND_BL_MY_NEW_COMMAND(len_to_follow)
+            elif(command_code) == COMMAND_BL_UPDATE_IMAGE:
+                process_COMMAND_BL_UPDATE_IMAGE(len_to_follow)
+            
+            elif command_code == COMMAND_BL_IMAGE_FRAME:
+                process_COMMAND_BL_IMAGE_FRAME(len_to_follow)
                 
             else:
                 print("\n   Invalid command code\n")
@@ -718,7 +822,7 @@ while True:
     print("   BL_READ_SECTOR_P_STATUS               --> 11")
     print("   BL_OTP_READ                           --> 12")
     print("   BL_DIS_R_W_PROTECT                    --> 13")
-    print("   BL_MY_NEW_COMMAND                     --> 14")
+    print("   BL_UPDATE_IMAGE                       --> 14")
     print("   MENU_EXIT                             --> 0")
 
     #command_code = int(input("\n   Type the command code here :") )
