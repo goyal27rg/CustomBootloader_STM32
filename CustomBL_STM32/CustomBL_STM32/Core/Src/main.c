@@ -580,40 +580,9 @@ void bootloader_handle_flash_erase_cmd(uint8_t *pBuffer)
 	bootloader_printDebugMsg("reached: bootloader_handle_flash_erase_cmd\r\n");
 	bootloader_send_ack(1);
 
-	FLASH_EraseInitTypeDef flashErase;
 	uint8_t sector_idx = pBuffer[2];
 	uint8_t nb_sectors = pBuffer[3];
-	uint32_t sector_error = 0;
-	uint8_t status = HAL_ERROR;
-	
-	if (sector_idx == 0xFF)  // 0xFF indicates mass erase
-	{
-		bootloader_printDebugMsg("Performing MASS ERASE\r\n");
-		flashErase.TypeErase = FLASH_TYPEERASE_MASSERASE;
-		flashErase.Banks = FLASH_BANK_BOTH;
-	}
-	else if (sector_idx + nb_sectors <= FLASH_SECTOR_TOTAL)
-	{
-		bootloader_printDebugMsg("Erasing sectors..\r\n");
-		bootloader_printDebugMsg("First sector: %d, number of sectors: %d\r\n", sector_idx, nb_sectors);
-		flashErase.TypeErase = FLASH_TYPEERASE_SECTORS;
-		flashErase.Sector =  sector_idx;
-		flashErase.NbSectors = nb_sectors;
-		flashErase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-	}
-	else
-	{
-		bootloader_printDebugMsg("INVALID SECTOR CHOICE!!!\r\n");
-		bootloader_uart_write_data(&status, sizeof(status));
-		return;
-	}
-	
-	HAL_FLASH_Unlock();
-	bootloader_printDebugMsg("Begin Erase...\r\n");
-	status = HAL_FLASHEx_Erase(&flashErase, &sector_error);
-	bootloader_printDebugMsg("Erase Done. Status: 0x%x\r\n", status);
-	HAL_FLASH_Lock();
-	
+	uint8_t status = execute_flash_erase(sector_idx, nb_sectors);
 	bootloader_uart_write_data(&status, sizeof(status));
 }
 
@@ -641,42 +610,6 @@ void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)
 	bootloader_uart_write_data(&status, sizeof(status));
 }
 
-uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t nb_bytes)
-{
-  uint8_t *pMem = (uint8_t *)dest_base_addr;
-	
-	bootloader_printDebugMsg("reached: execute_mem_write");
-	bootloader_printDebugMsg("Dest Mem base addr: 0x%x\r\n", pMem);
-	bootloader_printDebugMsg("Length of Write:    %d\r\n", nb_bytes);
-  	
-	HAL_FLASH_Unlock();
-	
-	FLASH->CR &= ~(FLASH_CR_PSIZE); // set program size to byte since we are writing byte-by-byte later
-	FLASH->CR |= FLASH_CR_PG; // set PG in FLASH_CR
-
-	while (nb_bytes > 0)
-  {
-    // wait till flash is busy
-		FLASH_WaitForLastOperation(HAL_MAX_DELAY);
-		//while(FLASH->SR & (1 << 16));
-		
-		// copy data
-		*pMem = *pBuffer;
-		//bootloader_printDebugMsg("pMem: 0x%x, pPayload: 0x%x\r\n", *pMem, *pBuffer);
-    pMem++;
-    pBuffer++;
-    nb_bytes--;
-		
-		// wait for FLASH_SR.BSY to get cleared
-		//while(FLASH->SR & FLASH_SR_BSY_Msk);
-  }
-	
-	FLASH_WaitForLastOperation(HAL_MAX_DELAY);
-	FLASH->CR &= ~(FLASH_CR_PG);
-	
-	HAL_FLASH_Lock();
-	return HAL_OK;
-}
 
 void bootloader_handle_en_rw_protect(uint8_t *pBuffer)
 {
@@ -696,6 +629,84 @@ void bootloader_handle_read_otp(uint8_t *pBuffer)
 
 void bootloader_handle_dis_rw_protect(uint8_t *pBuffer)
 {
+}
+
+uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t number_of_bytes)
+{
+  uint8_t *pMem = (uint8_t *)dest_base_addr;
+	
+	bootloader_printDebugMsg("reached: execute_mem_write");
+	bootloader_printDebugMsg("Dest Mem base addr: 0x%x\r\n", pMem);
+	bootloader_printDebugMsg("Length of Write:    %d\r\n", number_of_bytes);
+  	
+	HAL_FLASH_Unlock();
+	
+	FLASH->CR &= ~(FLASH_CR_PSIZE); // set program size to byte since we are writing byte-by-byte later
+	FLASH->CR |= FLASH_CR_PG; // set PG in FLASH_CR
+
+	while (number_of_bytes > 0)
+  {
+    // wait till flash is busy
+		FLASH_WaitForLastOperation(HAL_MAX_DELAY);
+		//while(FLASH->SR & (1 << 16));
+		
+		// copy data
+		*pMem = *pBuffer;
+		//bootloader_printDebugMsg("pMem: 0x%x, pPayload: 0x%x\r\n", *pMem, *pBuffer);
+    pMem++;
+    pBuffer++;
+    number_of_bytes--;
+		
+		// wait for FLASH_SR.BSY to get cleared
+		//while(FLASH->SR & FLASH_SR_BSY_Msk);
+  }
+	
+	FLASH_WaitForLastOperation(HAL_MAX_DELAY);
+	FLASH->CR &= ~(FLASH_CR_PG);
+	
+	HAL_FLASH_Lock();
+	return HAL_OK;
+}
+
+uint8_t execute_flash_erase(uint8_t sector_number , uint8_t total_number_of_sector)
+{
+	
+	bootloader_printDebugMsg("reached: execute_flash_erase\r\n");
+
+  FLASH_EraseInitTypeDef flashErase;
+ 	uint32_t sector_error = 0;
+  uint8_t status;
+
+
+	if (sector_number == 0xFF)  // 0xFF indicates mass erase
+	{
+		bootloader_printDebugMsg("Performing MASS ERASE\r\n");
+		flashErase.TypeErase = FLASH_TYPEERASE_MASSERASE;
+		flashErase.Banks = FLASH_BANK_BOTH;
+	}
+	else if (sector_number + total_number_of_sector <= FLASH_SECTOR_TOTAL)
+	{
+		bootloader_printDebugMsg("Erasing sectors..\r\n");
+		bootloader_printDebugMsg("First sector: %d, number of sectors: %d\r\n", sector_number, total_number_of_sector);
+		flashErase.TypeErase = FLASH_TYPEERASE_SECTORS;
+		flashErase.Sector =  sector_number;
+		flashErase.NbSectors = total_number_of_sector;
+		flashErase.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+	}
+	else
+	{
+		bootloader_printDebugMsg("INVALID SECTOR CHOICE!!!\r\n");
+		bootloader_uart_write_data(&status, sizeof(status));
+		return HAL_ERROR;
+	}
+	
+	HAL_FLASH_Unlock();
+	bootloader_printDebugMsg("Begin Erase...\r\n");
+	status = HAL_FLASHEx_Erase(&flashErase, &sector_error);
+	bootloader_printDebugMsg("Erase Done. Status: 0x%x\r\n", status);
+	HAL_FLASH_Lock();
+
+  return status;
 }
 
 #ifdef  USE_FULL_ASSERT
