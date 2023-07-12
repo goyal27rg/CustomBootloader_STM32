@@ -80,10 +80,6 @@ uint8_t configure_flash_sector_rw_protection(uint8_t sector_details, uint8_t pro
 
 uint16_t read_OB_rw_protection_status(void);
 
-/* Image update helper functions */
-void reset_image_settings(void);
-uint32_t get_image_to_update(void);
-
 
 //version 1.0
 #define BL_VERSION 0x10
@@ -171,6 +167,8 @@ void Error_Handler(void);
 typedef struct {
   uint32_t crc;
   uint32_t size;
+	uint32_t image_base_address;
+	uint8_t sector;
 	uint8_t version;
 } IMAGE_data_TypeDef;
 
@@ -189,9 +187,14 @@ typedef struct {
 	 First sizeof(IMAGE_data_TypeDef) store metadata
 */
 
+#define IMAGE_A                     0
+#define IMAGE_B                     1
+
+#define IMAGE_A_SECTOR              2
 #define IMAGE_A_DATA_BASE_ADDRESS   FLASH_SECTOR_2_BASE_ADDRESS
 #define IMAGE_A_BASE_ADDRESS        (IMAGE_A_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
 
+#define IMAGE_B_SECTOR              3
 #define IMAGE_B_DATA_BASE_ADDRESS   FLASH_SECTOR_3_BASE_ADDRESS
 #define IMAGE_B_BASE_ADDRESS        (IMAGE_B_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
 
@@ -203,6 +206,16 @@ typedef struct {
 
 // All images should be compiled to execute from sector 4
 #define IMAGE_PLACEMENT_ADDRESS     FLASH_SECTOR_4_BASE_ADDRESS
+
+/* Image update helper functions */
+void reset_image_settings(IMAGE_data_TypeDef*);
+IMAGE_data_TypeDef* get_image_to_update(void);
+uint8_t verify_image_crc(IMAGE_data_TypeDef* pImageData);
+IMAGE_data_TypeDef* get_image_metadata_ptr(uint8_t image);
+
+//TODO(relocate these defs, later)
+uint32_t get_CRC32(uint8_t *pData, uint32_t len);
+
 
 /* USER CODE END Private defines */
 

@@ -458,11 +458,14 @@ void bootloader_send_nack(void)
   HAL_UART_Transmit(&COM_UART, &nack, 1, HAL_MAX_DELAY);
 }
 
-uint8_t bootloader_verify_crc (uint8_t *pData, uint32_t len, uint32_t crc_host)
+uint32_t get_CRC32(uint8_t *pData, uint32_t len)
 {
-  // computer the CRC of pData for length len and match with crc_host
+	// compute the CRC of pData for length len and match with expected_crc
   uint32_t crcVal = 0xff;
 
+	/* Reset CRC Calculation Unit */
+  __HAL_CRC_DR_RESET(&hcrc);
+	
   for (uint32_t i=0; i<len; i++)
   {
     uint32_t data = pData[i];
@@ -470,18 +473,23 @@ uint8_t bootloader_verify_crc (uint8_t *pData, uint32_t len, uint32_t crc_host)
   }
 	 /* Reset CRC Calculation Unit */
   __HAL_CRC_DR_RESET(&hcrc);
+	
+	return crcVal;
+}
 
-  if (crcVal == crc_host)
+uint8_t verify_crc (uint8_t *pData, uint32_t len, uint32_t expected_crc)
+{
+  if (get_CRC32(pData, len) == expected_crc)
   {
     return VERIFY_CRC_SUCCESS;
   }
   else
   {
-    bootloader_printDebugMsg("BL CRC: 0x%x\r\nReceived:\r\n", crcVal);
+    /*bootloader_printDebugMsg("BL CRC: 0x%x\r\nReceived:\r\n", crcVal);
 		for (uint32_t i=0; i<len; i++)
 		{
 			bootloader_printDebugMsg(" 0x%x ", pData[i]);
-		}
+		}*/
 		return VERIFY_CRC_FAIL;
   }
 }
@@ -649,8 +657,8 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
   
  	bootloader_printDebugMsg("reached: bootloader_handle_image_update\r\n");
 	 	
-  uint32_t rx_image_size = *((uint32_t *) &pBuffer[2]);	
-
+  /* All the frame reception related stuff */
+	uint32_t rx_image_size = *((uint32_t *) &pBuffer[2]);	
   if (rx_image_size > (uint32_t) IMAGE_MAX_SIZE)
   {
     bootloader_send_nack();
@@ -670,14 +678,27 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 	
   uint8_t image_rx_buff[150];
 	uint8_t image_frame_data_len;
-	uint32_t image_to_update_address = get_image_to_update();
 	uint8_t num_frames_received = 0;
 	uint8_t ready = 0x1;
 	
 	bootloader_printDebugMsg("image size: %d\r\n", rx_image_size);
 	bootloader_printDebugMsg("Frames to be received: %d\r\n", total_image_frames);
 
-  // get all image frames and write to mem
+	// Get Image data	
+	IMAGE_data_TypeDef* pImageData = get_image_to_update();
+	uint32_t image_to_update_address = pImageData->image_base_address;
+	
+	// Save necessary data before upcoming sector erase. Metadata will be lost, otherwise
+	uint8_t current_version = pImageData->version;
+	
+	// perform a sector erase before writing
+	if (execute_flash_erase(pImageData->sector , 1) != HAL_OK)
+	{
+		bootloader_printDebugMsg("!!! ERROR while erasing flash sector %d.\r\nReturning..\r\n", pImageData->sector);
+		return;
+	}
+
+  // get all image frames from the HOST and write to mem
 	while(num_frames_received < total_image_frames)
 	{
 		memset(image_rx_buff, 0, 150);
@@ -692,7 +713,7 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 			
 		// verify CRC
 		uint32_t crc_host = *((uint32_t *) (image_rx_buff + image_frame_data_len + 1));  // last 4 bytes of the frame
-		uint8_t crc_status = bootloader_verify_crc(image_rx_buff, image_frame_data_len + 1, crc_host);
+		uint8_t crc_status = verify_crc(image_rx_buff, image_frame_data_len + 1, crc_host);
 		
 		if (crc_status == VERIFY_CRC_FAIL)
 		{
@@ -710,26 +731,96 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 		bootloader_printDebugMsg("Frames Received: %d/%d\r", num_frames_received, total_image_frames);
 		bootloader_uart_write_data(&status, 1);	
 	}
-
-	// jump to image
-	uint32_t image_base_addr = get_image_to_update();
-	uint32_t image_reset_handler_address = *((uint32_t *) (image_base_addr + 4));
-	image_reset_handler_address |= 0x1;  // Making T-bit 1
 	
-	bootloader_printDebugMsg("Image base addr: 0x%x\r\n", image_base_addr);
-	bootloader_printDebugMsg("Jumping to:      0x%x\r\n", image_reset_handler_address);
-
-	void (*jump_to_image) (void) = (void *) image_reset_handler_address;
-	jump_to_image();
+	// Image has been written
+	// Perform post processing
+	reset_image_settings(pImageData);
+	pImageData->version = current_version + 1;
+	pImageData->size = rx_image_size;
+	pImageData->crc = get_CRC32((uint8_t*)pImageData->image_base_address, pImageData->size);
+		
 }
 
-void reset_image_settings(void)
+void reset_image_settings(IMAGE_data_TypeDef* pImageData)
 {
+	/*
+	Reset:
+	1/ CRC to 0xFFFFFFFF
+	2/ size to 0
+	3/ image_base_address to macro defined address
+	4/ sector to macro defined sector
+	5/ version to 0
+	*/
 	
+	pImageData->crc = 0xFFFFFFFF;
+	pImageData->size = 0;
+	pImageData->version = 0;
+	
+	if (pImageData == IMAGE_A_DATA)
+	{
+		pImageData->image_base_address = IMAGE_A_BASE_ADDRESS;
+		pImageData->sector = IMAGE_A_SECTOR;
+	}
+	else
+	{
+		pImageData->image_base_address = IMAGE_B_BASE_ADDRESS;
+		pImageData->sector = IMAGE_B_SECTOR;
+	}
 }
-uint32_t get_image_to_update(void)
+
+IMAGE_data_TypeDef * get_image_metadata_ptr(uint8_t image)
 {
-	return IMAGE_A_BASE_ADDRESS;
+	if (image == IMAGE_A)
+	{
+		return IMAGE_A_DATA;
+	}
+	else
+	{
+		return IMAGE_B_DATA;
+	}
+}
+
+uint8_t verify_image_crc(IMAGE_data_TypeDef* pImageData)
+{
+		//TODO(check if this is needed, later)
+	if (pImageData->crc == 0xFFFFFFFF) {
+		return VERIFY_CRC_FAIL;
+	}
+	return verify_crc((uint8_t *) pImageData->image_base_address, pImageData->size, pImageData->crc);
+}
+
+IMAGE_data_TypeDef* get_image_to_update(void)
+{
+	/*
+	Find which image is to be updated
+	Erase the sector of that image
+	
+	Procedure:
+	1/ verify crc of both images
+	2/ if crc verification of an image fails, select it
+	3/ if crc verification of both images passes, pick the one with lower version number
+	4/ if versions are same, pick image A
+	*/
+	
+	IMAGE_data_TypeDef* pImageAData = IMAGE_A_DATA;
+	IMAGE_data_TypeDef* pImageBData = IMAGE_B_DATA;
+
+	if (verify_image_crc(pImageAData) == VERIFY_CRC_FAIL)
+	{
+		return pImageAData;
+	}
+	if (verify_image_crc(pImageBData) == VERIFY_CRC_FAIL)
+	{
+		return pImageBData;
+	}
+	if (pImageAData->version <= pImageBData->version)
+	{
+		return pImageAData;
+	}
+	else
+	{
+		return pImageAData;
+	}
 }
 
 uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t number_of_bytes)
