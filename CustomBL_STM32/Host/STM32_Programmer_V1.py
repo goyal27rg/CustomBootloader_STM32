@@ -638,7 +638,10 @@ def decode_menu_command_code(command):
         for i in data_buf[1:COMMAND_BL_UPDATE_IMAGE_LEN]:
             Write_to_serial_port(i,COMMAND_BL_UPDATE_IMAGE_LEN-1)
         
-        ret_value = read_bootloader_reply(data_buf[1])
+        retval = read_bootloader_reply(data_buf[1])
+        if (retval == -2):
+            print("Bootloader timeoout. Returing...")
+            return
                 
         img_frame_size = 128
         bytes_to_write = file_size
@@ -660,7 +663,7 @@ def decode_menu_command_code(command):
             bytes_to_write -= bytes_this_iter
             bytes_written += bytes_this_iter
 
-            crc32       = get_crc([bytes_this_iter] + image_buff, bytes_to_write)
+            crc32       = get_crc([bytes_this_iter] + image_buff, bytes_this_iter+1)
             crc32 = crc32 & ((1 << 32) - 1)
             image_buff.append(word_to_byte(crc32,1,1))
             image_buff.append(word_to_byte(crc32,2,1))
@@ -684,7 +687,11 @@ def decode_menu_command_code(command):
                 Write_to_serial_port(data, 1)
             
             retval = read_bootloader_reply(COMMAND_BL_IMAGE_FRAME)
-            if (retval != 0 ):
+            
+            if (retval == -2):
+                print("Bootloader timeoout. Returing...")
+                return
+            elif (retval != 0 ):
                 print("Something's wrong !!!!!")
                 return
             #time.sleep(.3)            

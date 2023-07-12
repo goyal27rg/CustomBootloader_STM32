@@ -477,7 +477,11 @@ uint8_t bootloader_verify_crc (uint8_t *pData, uint32_t len, uint32_t crc_host)
   }
   else
   {
-    bootloader_printDebugMsg("BL CRC: 0x%x\r\n", crcVal);
+    bootloader_printDebugMsg("BL CRC: 0x%x\r\nReceived:\r\n", crcVal);
+		for (uint32_t i=0; i<len; i++)
+		{
+			bootloader_printDebugMsg(" 0x%x ", pData[i]);
+		}
 		return VERIFY_CRC_FAIL;
   }
 }
@@ -646,7 +650,6 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
  	bootloader_printDebugMsg("reached: bootloader_handle_image_update\r\n");
 	 	
   uint32_t rx_image_size = *((uint32_t *) &pBuffer[2]);	
-	bootloader_printDebugMsg("image size: %d\r\n", rx_image_size);
 
   if (rx_image_size > (uint32_t) IMAGE_MAX_SIZE)
   {
@@ -659,19 +662,23 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
   uint8_t status = HAL_OK;
 	
 	// calculate number of frames to receive
-	uint8_t num_rx_frames = rx_image_size / 128;
+	uint8_t total_image_frames = rx_image_size / 128;
 	if (rx_image_size % 128 != 0)
 	{
-		num_rx_frames++;
+		total_image_frames++;
 	}
 	
   uint8_t image_rx_buff[150];
 	uint8_t image_frame_data_len;
 	uint32_t image_to_update_address = get_image_to_update();
+	uint8_t num_frames_received = 0;
 	uint8_t ready = 0x1;
+	
+	bootloader_printDebugMsg("image size: %d\r\n", rx_image_size);
+	bootloader_printDebugMsg("Frames to be received: %d\r\n", total_image_frames);
 
   // get all image frames and write to mem
-	while(num_rx_frames > 0)
+	while(num_frames_received < total_image_frames)
 	{
 		memset(image_rx_buff, 0, 150);
 		
@@ -690,25 +697,18 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 		if (crc_status == VERIFY_CRC_FAIL)
 		{
 			bootloader_send_nack();
-			bootloader_printDebugMsg("CRC CHECK FAILED !!! -- host CRC: 0x%x\r\n", crc_host);
+			bootloader_printDebugMsg("\nCRC CHECK FAILED !!! -- host CRC: 0x%x\r\n", crc_host);
 			return;
-		}
-		
-		bootloader_printDebugMsg("image_frame_data_len: %d  --  num_rx_frames: %d", image_frame_data_len, num_rx_frames);
-		bootloader_printDebugMsg("  -- image_to_update_address: 0x%x\r\n", image_to_update_address);
-				
+		}			
 		bootloader_send_ack(1);  // CRC check passed
 		
 		// write to mem and update address
 		execute_mem_write(&image_rx_buff[1], image_to_update_address, (uint32_t) image_frame_data_len);
 		image_to_update_address += image_frame_data_len;
-		num_rx_frames--;
+		num_frames_received++;
 		
-		bootloader_uart_write_data(&status, 1);
-		
-		//uint8_t cTick = HAL_GetTick();
-		//while(HAL_GetTick() < cTick + 500);
-
+		bootloader_printDebugMsg("Frames Received: %d/%d\r", num_frames_received, total_image_frames);
+		bootloader_uart_write_data(&status, 1);	
 	}
 
 	// jump to image

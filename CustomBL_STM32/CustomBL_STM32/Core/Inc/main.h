@@ -171,6 +171,7 @@ void Error_Handler(void);
 typedef struct {
   uint32_t crc;
   uint32_t size;
+	uint8_t version;
 } IMAGE_data_TypeDef;
 
 #define FLASH_SECTOR_1_BASE_ADDRESS 0x08004000U
@@ -183,17 +184,25 @@ typedef struct {
 #define FLASH_SECTOR_3_SIZE 0x04000U
 #define FLASH_SECTOR_4_SIZE 0x10000U
 
-#define IMAGE_A_BASE_ADDRESS        FLASH_SECTOR_2_BASE_ADDRESS
-#define IMAGE_B_BASE_ADDRESS        FLASH_SECTOR_3_BASE_ADDRESS
+/* All contents of Image A are placed in sector 2
+	 All contents of Image B are placed in sector 3
+	 First sizeof(IMAGE_data_TypeDef) store metadata
+*/
 
-#define IMAGE_MAX_SIZE              FLASH_SECTOR_2_SIZE
+#define IMAGE_A_DATA_BASE_ADDRESS   FLASH_SECTOR_2_BASE_ADDRESS
+#define IMAGE_A_BASE_ADDRESS        (IMAGE_A_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
 
-// Store Image Data in sector 1
-#define IMAGE_A_DATA_BASE_ADDRESS   FLASH_SECTOR_1_BASE_ADDRESS
-#define IMAGE_B_DATA_BASE_ADDRESS   IMAGE_A_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef);
+#define IMAGE_B_DATA_BASE_ADDRESS   FLASH_SECTOR_3_BASE_ADDRESS
+#define IMAGE_B_BASE_ADDRESS        (IMAGE_B_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
 
+#define IMAGE_MAX_SIZE              (FLASH_SECTOR_2_SIZE - sizeof(IMAGE_data_TypeDef))  // Sector 2 and 3 have same size, so this works for both Images
+
+// Define pointer to access image data
 #define IMAGE_A_DATA                ((IMAGE_data_TypeDef *) IMAGE_A_DATA_BASE_ADDRESS)
 #define IMAGE_B_DATA                ((IMAGE_data_TypeDef *) IMAGE_B_DATA_BASE_ADDRESS)
+
+// All images should be compiled to execute from sector 4
+#define IMAGE_PLACEMENT_ADDRESS     FLASH_SECTOR_4_BASE_ADDRESS
 
 /* USER CODE END Private defines */
 
