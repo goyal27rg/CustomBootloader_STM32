@@ -258,6 +258,7 @@ int main(void)
 			if (imageACrcValid && imageBCrcValid)
 			{
 				// case when both images have correct CRC
+				bootloader_printDebugMsg("\r\nBoth images VALID.\r\n");
 				if (pImageAData->version >= pImageBData->version)
 				{
 					// TODO(also update the other image, later)
@@ -991,10 +992,14 @@ void bootloader_boot_from_image(IMAGE_data_TypeDef* pImageData)
 	2/ Then load the image to placement address (IMAGE_PLACEMENT_ADDRESS)
 	3/ Get the reset handler and jump to it
 	*/
+
+	char image_name = bootloader_get_image_name(pImageData);
+
 	execute_flash_erase(IMAGE_PLACEMENT_SECTOR, 1);
+	bootloader_printDebugMsg("\r\nLoading IMAGE %c to SECTOR %d\r\n", image_name, IMAGE_PLACEMENT_SECTOR);
 	flash_execute_mem_write((uint8_t *) pImageData->image_base_address, (uint32_t) IMAGE_PLACEMENT_ADDRESS, pImageData->size);
 	
-	bootloader_printDebugMsg("Booting from IMAGE: %c\r\n", bootloader_get_image_name(pImageData));	
+	bootloader_printDebugMsg("Booting from IMAGE: %c\r\n", image_name);	
 	
 	bootloader_set_msp_and_jump_to_reset_handler((uint32_t) IMAGE_PLACEMENT_ADDRESS);
 }

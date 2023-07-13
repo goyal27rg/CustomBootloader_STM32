@@ -53,15 +53,18 @@ mem_print_counter = 0
 
 #----------------------------- file ops----------------------------------------
 
+bin_file_name = "UserApp_STM32.bin"
+
 def calc_file_len():
     print(f"CWD: {os.getcwd()}")
-    size = os.path.getsize("user_app.bin")
+    size = os.path.getsize(bin_file_name)
     return size
 
 def open_the_file():
     global bin_file
-    print(f"CWD: {os.getcwd()}")
-    bin_file = open('user_app.bin','rb')
+    print(os.getcwd())
+    bin_file = open(bin_file_name,'rb')
+    #bin_file = open('..\UserApp_STM32\UserApp_STM32\MDK-ARM\UserApp_STM32.bin','rb')
     #read = bin_file.read()
     #global file_contents = bytearray(read)
 
