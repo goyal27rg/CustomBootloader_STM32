@@ -694,7 +694,7 @@ def decode_menu_command_code(command):
             elif (retval != 0 ):
                 print("Something's wrong !!!!!")
                 return
-            #time.sleep(.3)            
+            #time.sleep(.3)
             frame_count += 1
             print(f"\bwritten {bytes_written} bytes so far. {bytes_to_write} remaining\n")
             print(f"frames written: {frame_count}")

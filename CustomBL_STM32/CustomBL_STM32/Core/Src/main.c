@@ -87,15 +87,6 @@ void bootloader_printDebugMsg(char* message, ...)
 	bootloader_sendMessage(DEBUG_UART, str);
 }
 
-void bootloader_sendCommMsg(char* message, ...)
-{
-  char str[50];
-	va_list args;
-	va_start(args, message);
-	vsprintf(str, message, args);
-	bootloader_sendMessage(COM_UART, str);
-}
-
 void BL_uart_read_data(void)
 {
 	uint8_t rcv_len;
@@ -171,21 +162,22 @@ void BL_uart_read_data(void)
 	}
 }
 
-void BL_uart_jump_to_user_code(void)
+void bootloader_set_msp_and_jump_to_reset_handler(uint32_t image_base_address)
 {
-	// User code shoould be placed at sector 2 of the Flash
-	// First set the MSP for User App
-	uint32_t MSP = *(volatile uint32_t *)FLASH_SECTOR_2_BASE_ADDRESS;
+	// First set the MSP
+	uint32_t MSP = *((volatile uint32_t *) image_base_address);
 	bootloader_printDebugMsg("Setting MSP to 0x%X\r\n", MSP);
 	__set_MSP(MSP);
 	
-	// Jump to User App reset handler
-	uint32_t reset_handler_address = *(volatile uint32_t *) (FLASH_SECTOR_2_BASE_ADDRESS + 4);
+	// Calculate and Jump to reset handler
+	uint32_t reset_handler_address = *((volatile uint32_t *) (image_base_address + 4));
 	reset_handler_address |= 0x1;  // Make T bit 1
+	
 	bootloader_printDebugMsg("Reset Handler Address: 0x%x\r\n", reset_handler_address);
+	
 	void (*reset_handler) (void);
 	reset_handler = (void*) reset_handler_address;
-	bootloader_printDebugMsg("Jumping to USER APP...\r\n");
+	bootloader_printDebugMsg("Jumping to image...\r\n");
 	reset_handler();
 }
 
@@ -239,7 +231,84 @@ int main(void)
 		else
 		{
 			bootloader_printDebugMsg("Button released\r\n");
-			BL_uart_jump_to_user_code();
+			/*
+			Image selection policy:
+			1/ Load image A and verify CRC
+			2/ Load image B and verify CRC
+			3/ if both CRC are correct, load the one with higher version number
+			3.1/ if version is same, default to A
+			3.2/ TODO(if version is different, fisrt update the one with lower version, later)
+			4/ if only one CRC is correct, first update the other one
+			5/ if both CRC are incorrect, print an error message and wait for reset
+			*/
+			IMAGE_data_TypeDef *pImageAData = IMAGE_A_DATA;
+			IMAGE_data_TypeDef *pImageBData = IMAGE_B_DATA;
+			
+			pImageAData->image_base_address = IMAGE_A_BASE_ADDRESS;
+			pImageBData->image_base_address = IMAGE_B_BASE_ADDRESS;
+			
+			uint8_t imageACrcValid = verify_image_crc(pImageAData) == VERIFY_CRC_SUCCESS;
+			bootloader_printDebugMsg("Validating CRC of IMAGE A. CRC Valid: %d\r\n", imageACrcValid);
+			
+			uint8_t imageBCrcValid = verify_image_crc(pImageBData) == VERIFY_CRC_SUCCESS;
+			bootloader_printDebugMsg("Validating CRC of IMAGE B. CRC Valid: %d\r\n", imageBCrcValid);
+			
+			bootloader_printDebugMsg("CRC validation complete\r\n");
+			
+			if (imageACrcValid && imageBCrcValid)
+			{
+				// case when both images have correct CRC
+				if (pImageAData->version >= pImageBData->version)
+				{
+					// TODO(also update the other image, later)
+					bootloader_boot_from_image(pImageAData);
+				}
+				else
+				{
+  				// TODO(also update the other image, later)
+					bootloader_boot_from_image(pImageBData);
+				}
+			}
+			else if (imageACrcValid)
+			{
+				// only image A CRC was correct
+  			    // TODO(also update the other image instead of just erasing, later)
+				IMAGE_data_TypeDef resetImageB = bootloader_get_reset_image_settings(pImageBData);
+				execute_flash_erase(resetImageB.sector, 1);
+				bootloader_write_image_settings(pImageBData, resetImageB);
+
+				bootloader_boot_from_image(pImageAData);
+			}
+			else if (imageBCrcValid)
+			{
+				// only image B CRC was correct
+				// TODO(also update the other image instead of just erasing, later)
+				IMAGE_data_TypeDef resetImageA = bootloader_get_reset_image_settings(pImageAData);
+				execute_flash_erase(resetImageA.sector, 1);
+				bootloader_write_image_settings(pImageAData, resetImageA);
+				
+				bootloader_boot_from_image(pImageBData);
+			}
+			else
+			{
+				// both images are invalid
+				bootloader_printDebugMsg("ERROR !!!\r\nBOTH IMAGES ARE INVALID.\r\n");
+
+				IMAGE_data_TypeDef resetImageA = bootloader_get_reset_image_settings(pImageAData);
+				IMAGE_data_TypeDef resetImageB = bootloader_get_reset_image_settings(pImageBData);
+				
+				// erase the sectors
+				execute_flash_erase(resetImageA.sector, 1);
+				execute_flash_erase(resetImageB.sector, 1);
+				
+				bootloader_write_image_settings(pImageAData, resetImageA);
+				bootloader_write_image_settings(pImageBData, resetImageB);
+
+				bootloader_printDebugMsg("\r\nRESET AND REPROGRAM.\r\n");
+				//bootloader_printDebugMsg("BEWARE THAT IMAGES MUST BE COMPILED TO BE PLACED AT SECTOR: %d\r\n", IMAGE_PLACEMENT_SECTOR);
+
+				while(1);
+			}
 		}
 		
 		uint32_t current_tick = HAL_GetTick();
@@ -612,7 +681,7 @@ void bootloader_handle_mem_write_cmd(uint8_t *pBuffer)
   uint32_t mem_base_addr = *((uint32_t*) &pBuffer[2]);
   uint8_t payload_len = pBuffer[6];
 
-  execute_mem_write(&pBuffer[7], mem_base_addr, payload_len);
+  flash_execute_mem_write(&pBuffer[7], mem_base_addr, payload_len);
 
 	bootloader_uart_write_data(&status, sizeof(status));
 }
@@ -684,17 +753,19 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 	bootloader_printDebugMsg("image size: %d\r\n", rx_image_size);
 	bootloader_printDebugMsg("Frames to be received: %d\r\n", total_image_frames);
 
-	// Get Image data	
+	// Get Image-to-update data	
 	IMAGE_data_TypeDef* pImageData = get_image_to_update();
-	uint32_t image_to_update_address = pImageData->image_base_address;
+	// copy on temp struct as pImage* data wil get erased
+	IMAGE_data_TypeDef temp_pImageData = *pImageData;
 	
-	// Save necessary data before upcoming sector erase. Metadata will be lost, otherwise
-	uint8_t current_version = pImageData->version;
+	// We don't know if *pImageData is valid or not, so use another object with default settings
+	IMAGE_data_TypeDef resetImage = bootloader_get_reset_image_settings(pImageData);
+	uint32_t image_to_update_address = resetImage.image_base_address;
 	
 	// perform a sector erase before writing
-	if (execute_flash_erase(pImageData->sector , 1) != HAL_OK)
+	if (execute_flash_erase(resetImage.sector , 1) != HAL_OK)
 	{
-		bootloader_printDebugMsg("!!! ERROR while erasing flash sector %d.\r\nReturning..\r\n", pImageData->sector);
+		bootloader_printDebugMsg("!!! ERROR while erasing flash sector %d.\r\nReturning..\r\n", resetImage.sector);
 		return;
 	}
 
@@ -720,11 +791,11 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 			bootloader_send_nack();
 			bootloader_printDebugMsg("\nCRC CHECK FAILED !!! -- host CRC: 0x%x\r\n", crc_host);
 			return;
-		}			
+		}
 		bootloader_send_ack(1);  // CRC check passed
 		
 		// write to mem and update address
-		execute_mem_write(&image_rx_buff[1], image_to_update_address, (uint32_t) image_frame_data_len);
+		flash_execute_mem_write(&image_rx_buff[1], image_to_update_address, (uint32_t) image_frame_data_len);
 		image_to_update_address += image_frame_data_len;
 		num_frames_received++;
 		
@@ -733,15 +804,23 @@ void bootloader_handle_image_update(uint8_t *pBuffer)
 	}
 	
 	// Image has been written
-	// Perform post processing
-	reset_image_settings(pImageData);
-	pImageData->version = current_version + 1;
-	pImageData->size = rx_image_size;
-	pImageData->crc = get_CRC32((uint8_t*)pImageData->image_base_address, pImageData->size);
-		
+	// Perform post processing	
+	uint8_t temp_buff[pImageData->size];
+	
+	//TODO(version may also be incorrect if *pImageData was corrupt, figure out a  way, later)
+	resetImage.version = temp_pImageData.version + 1;
+	resetImage.size = rx_image_size;
+	resetImage.crc = get_CRC32((uint8_t*)resetImage.image_base_address, rx_image_size);
+	
+	// remember, we can write only once after erasing.
+	bootloader_write_image_settings(pImageData, resetImage);
+	
+	bootloader_printDebugMsg("IMAGE %c written successfully.\r\n", bootloader_get_image_name(pImageData));
+	bootloader_printDebugMsg("Version: %d, Size: %d, CRC: 0x%x\r\n", pImageData->version, pImageData->size, pImageData->crc);
+	bootloader_printDebugMsg("Version: %d, Size: %d, CRC: 0x%x\r\n", resetImage.version, resetImage.size, resetImage.crc);
 }
 
-void reset_image_settings(IMAGE_data_TypeDef* pImageData)
+IMAGE_data_TypeDef bootloader_get_reset_image_settings(IMAGE_data_TypeDef* pImageData)
 {
 	/*
 	Reset:
@@ -750,34 +829,36 @@ void reset_image_settings(IMAGE_data_TypeDef* pImageData)
 	3/ image_base_address to macro defined address
 	4/ sector to macro defined sector
 	5/ version to 0
+	DONT FORGET! -> Flash can't be written directly, so create a temp obj and copy it
 	*/
 	
-	pImageData->crc = 0xFFFFFFFF;
-	pImageData->size = 0;
-	pImageData->version = 0;
+	IMAGE_data_TypeDef temp;
+	temp.crc = 0xFFFFFFFF;
+	temp.size = 0;
+	temp.version = 0;
 	
 	if (pImageData == IMAGE_A_DATA)
 	{
-		pImageData->image_base_address = IMAGE_A_BASE_ADDRESS;
-		pImageData->sector = IMAGE_A_SECTOR;
+		temp.image_base_address = IMAGE_A_BASE_ADDRESS;
+		temp.sector = IMAGE_A_SECTOR;
 	}
 	else
 	{
-		pImageData->image_base_address = IMAGE_B_BASE_ADDRESS;
-		pImageData->sector = IMAGE_B_SECTOR;
+		temp.image_base_address = IMAGE_B_BASE_ADDRESS;
+		temp.sector = IMAGE_B_SECTOR;
 	}
+	
+	// Don't write here as flash needs to be erased for that
+	//bootloader_write_image_settings(pImageData, temp);
+	
+	return temp;
 }
 
-IMAGE_data_TypeDef * get_image_metadata_ptr(uint8_t image)
+
+void bootloader_write_image_settings(IMAGE_data_TypeDef* pImageData, IMAGE_data_TypeDef ImageDataToWrite)
 {
-	if (image == IMAGE_A)
-	{
-		return IMAGE_A_DATA;
-	}
-	else
-	{
-		return IMAGE_B_DATA;
-	}
+	bootloader_printDebugMsg("Writing %c Image settings\r\n", bootloader_get_image_name(pImageData));
+	flash_execute_mem_write((uint8_t*) &ImageDataToWrite, (uint32_t) pImageData, sizeof(IMAGE_data_TypeDef));
 }
 
 uint8_t verify_image_crc(IMAGE_data_TypeDef* pImageData)
@@ -802,32 +883,37 @@ IMAGE_data_TypeDef* get_image_to_update(void)
 	4/ if versions are same, pick image A
 	*/
 	
+	bootloader_printDebugMsg("reached: get_image_to_update\r\n");
+	
 	IMAGE_data_TypeDef* pImageAData = IMAGE_A_DATA;
 	IMAGE_data_TypeDef* pImageBData = IMAGE_B_DATA;
 
 	if (verify_image_crc(pImageAData) == VERIFY_CRC_FAIL)
 	{
+		bootloader_printDebugMsg("IMAGE A CRC Failed\r\n");
 		return pImageAData;
 	}
 	if (verify_image_crc(pImageBData) == VERIFY_CRC_FAIL)
 	{
+		bootloader_printDebugMsg("IMAGE B CRC Failed\r\n");
 		return pImageBData;
 	}
+	bootloader_printDebugMsg("versions A, B: %d, %d\r\n", pImageAData->version, pImageAData->version);
 	if (pImageAData->version <= pImageBData->version)
 	{
 		return pImageAData;
 	}
 	else
 	{
-		return pImageAData;
+		return pImageBData;
 	}
 }
 
-uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t number_of_bytes)
+uint8_t flash_execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t number_of_bytes)
 {
   uint8_t *pMem = (uint8_t *)dest_base_addr;
 	
-	//bootloader_printDebugMsg("reached: execute_mem_write\r\n");
+	//bootloader_printDebugMsg("reached: flash_execute_mem_write\r\n");
 	//bootloader_printDebugMsg("Dest Mem base addr: 0x%x\r\n", pMem);
 	//bootloader_printDebugMsg("Length of Write:    %d\r\n", number_of_bytes);
   	
@@ -862,14 +948,11 @@ uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t nu
 
 uint8_t execute_flash_erase(uint8_t sector_number , uint8_t total_number_of_sector)
 {
-	
 	bootloader_printDebugMsg("reached: execute_flash_erase\r\n");
 
   FLASH_EraseInitTypeDef flashErase;
  	uint32_t sector_error = 0;
-  uint8_t status;
-
-
+  
 	if (sector_number == 0xFF)  // 0xFF indicates mass erase
 	{
 		bootloader_printDebugMsg("Performing MASS ERASE\r\n");
@@ -888,17 +971,44 @@ uint8_t execute_flash_erase(uint8_t sector_number , uint8_t total_number_of_sect
 	else
 	{
 		bootloader_printDebugMsg("INVALID SECTOR CHOICE!!!\r\n");
-		bootloader_uart_write_data(&status, sizeof(status));
 		return HAL_ERROR;
 	}
 	
 	HAL_FLASH_Unlock();
 	bootloader_printDebugMsg("Begin Erase...\r\n");
-	status = HAL_FLASHEx_Erase(&flashErase, &sector_error);
-	bootloader_printDebugMsg("Erase Done. Status: 0x%x\r\n", status);
+	while(HAL_FLASHEx_Erase(&flashErase, &sector_error) != HAL_OK);
+	bootloader_printDebugMsg("Erase Done.\r\n");
 	HAL_FLASH_Lock();
 
-  return status;
+  return HAL_OK;
+}
+
+void bootloader_boot_from_image(IMAGE_data_TypeDef* pImageData)
+{
+	/*
+	to boot from an image,
+	1/ first Erase the placement sector (IMAGE_PLACEMENT_SECTOR)
+	2/ Then load the image to placement address (IMAGE_PLACEMENT_ADDRESS)
+	3/ Get the reset handler and jump to it
+	*/
+	execute_flash_erase(IMAGE_PLACEMENT_SECTOR, 1);
+	flash_execute_mem_write((uint8_t *) pImageData->image_base_address, (uint32_t) IMAGE_PLACEMENT_ADDRESS, pImageData->size);
+	
+	bootloader_printDebugMsg("Booting from IMAGE: %c\r\n", bootloader_get_image_name(pImageData));	
+	
+	bootloader_set_msp_and_jump_to_reset_handler((uint32_t) IMAGE_PLACEMENT_ADDRESS);
+}
+
+char bootloader_get_image_name(IMAGE_data_TypeDef* pImageData)
+{
+	if (pImageData == IMAGE_A_DATA)
+	{
+		return 'A';
+	}
+	else
+	{
+		return 'B';
+	}
 }
 
 #ifdef  USE_FULL_ASSERT

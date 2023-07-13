@@ -74,7 +74,7 @@ uint16_t get_mcu_chip_id(void);
 uint8_t get_flash_rdp_level(void);
 uint8_t verify_address(uint32_t go_address);
 uint8_t execute_flash_erase(uint8_t sector_number , uint8_t total_number_of_sector);
-uint8_t execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t num_of_bytes);
+uint8_t flash_execute_mem_write(uint8_t* pBuffer, uint32_t dest_base_addr, uint32_t num_of_bytes);
 
 uint8_t configure_flash_sector_rw_protection(uint8_t sector_details, uint8_t protection_mode, uint8_t disable);
 
@@ -168,50 +168,53 @@ typedef struct {
   uint32_t crc;
   uint32_t size;
 	uint32_t image_base_address;
-	uint8_t sector;
-	uint8_t version;
+	uint32_t sector;
+	uint32_t version;
 } IMAGE_data_TypeDef;
 
-#define FLASH_SECTOR_1_BASE_ADDRESS 0x08004000U
-#define FLASH_SECTOR_2_BASE_ADDRESS 0x08008000U
-#define FLASH_SECTOR_3_BASE_ADDRESS 0x0800C000U
-#define FLASH_SECTOR_4_BASE_ADDRESS 0x08010000U
+#define FLASH_SECTOR_1_BASE_ADDRESS (uint32_t) 0x08004000U
+#define FLASH_SECTOR_2_BASE_ADDRESS (uint32_t) 0x08008000U
+#define FLASH_SECTOR_3_BASE_ADDRESS (uint32_t) 0x0800C000U
+#define FLASH_SECTOR_4_BASE_ADDRESS (uint32_t) 0x08010000U
 
-#define FLASH_SECTOR_1_SIZE 0x04000U
-#define FLASH_SECTOR_2_SIZE 0x04000U
-#define FLASH_SECTOR_3_SIZE 0x04000U
-#define FLASH_SECTOR_4_SIZE 0x10000U
+#define FLASH_SECTOR_1_SIZE (uint32_t) 0x04000U
+#define FLASH_SECTOR_2_SIZE (uint32_t) 0x04000U
+#define FLASH_SECTOR_3_SIZE (uint32_t) 0x04000U
+#define FLASH_SECTOR_4_SIZE (uint32_t) 0x10000U
 
 /* All contents of Image A are placed in sector 2
 	 All contents of Image B are placed in sector 3
 	 First sizeof(IMAGE_data_TypeDef) store metadata
 */
 
-#define IMAGE_A                     0
-#define IMAGE_B                     1
+//#define IMAGE_A                     (uint8_t) 0
+//#define IMAGE_B                     (uint8_t) 1
 
-#define IMAGE_A_SECTOR              2
-#define IMAGE_A_DATA_BASE_ADDRESS   FLASH_SECTOR_2_BASE_ADDRESS
-#define IMAGE_A_BASE_ADDRESS        (IMAGE_A_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
+#define IMAGE_A_SECTOR              (uint8_t) 2
+#define IMAGE_A_DATA_BASE_ADDRESS   (uint32_t) FLASH_SECTOR_2_BASE_ADDRESS
+#define IMAGE_A_BASE_ADDRESS        (uint32_t) (IMAGE_A_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
 
-#define IMAGE_B_SECTOR              3
-#define IMAGE_B_DATA_BASE_ADDRESS   FLASH_SECTOR_3_BASE_ADDRESS
-#define IMAGE_B_BASE_ADDRESS        (IMAGE_B_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
+#define IMAGE_B_SECTOR              (uint8_t) 3
+#define IMAGE_B_DATA_BASE_ADDRESS   (uint32_t) FLASH_SECTOR_3_BASE_ADDRESS
+#define IMAGE_B_BASE_ADDRESS        (uint32_t) (IMAGE_B_DATA_BASE_ADDRESS + sizeof(IMAGE_data_TypeDef))
 
-#define IMAGE_MAX_SIZE              (FLASH_SECTOR_2_SIZE - sizeof(IMAGE_data_TypeDef))  // Sector 2 and 3 have same size, so this works for both Images
+#define IMAGE_MAX_SIZE              (uint32_t) (FLASH_SECTOR_2_SIZE - sizeof(IMAGE_data_TypeDef))  // Sector 2 and 3 have same size, so this works for both Images
 
 // Define pointer to access image data
 #define IMAGE_A_DATA                ((IMAGE_data_TypeDef *) IMAGE_A_DATA_BASE_ADDRESS)
 #define IMAGE_B_DATA                ((IMAGE_data_TypeDef *) IMAGE_B_DATA_BASE_ADDRESS)
 
 // All images should be compiled to execute from sector 4
-#define IMAGE_PLACEMENT_ADDRESS     FLASH_SECTOR_4_BASE_ADDRESS
+#define IMAGE_PLACEMENT_ADDRESS     (uint32_t) FLASH_SECTOR_4_BASE_ADDRESS
+#define IMAGE_PLACEMENT_SECTOR      (uint8_t) 4
 
 /* Image update helper functions */
-void reset_image_settings(IMAGE_data_TypeDef*);
-IMAGE_data_TypeDef* get_image_to_update(void);
+IMAGE_data_TypeDef bootloader_get_reset_image_settings(IMAGE_data_TypeDef*);
+void bootloader_write_image_settings(IMAGE_data_TypeDef* pImageData, IMAGE_data_TypeDef ImageDataToWrite);
+void bootloader_boot_from_image(IMAGE_data_TypeDef* pImageData);
 uint8_t verify_image_crc(IMAGE_data_TypeDef* pImageData);
-IMAGE_data_TypeDef* get_image_metadata_ptr(uint8_t image);
+IMAGE_data_TypeDef* get_image_to_update(void);
+char bootloader_get_image_name(IMAGE_data_TypeDef* pImageData);
 
 //TODO(relocate these defs, later)
 uint32_t get_CRC32(uint8_t *pData, uint32_t len);
